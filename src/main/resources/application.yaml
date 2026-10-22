@@ -1,0 +1,61 @@
+# Toda la configuración llega por variables de entorno (DAS sec. 5 y 10).
+# En local, las variables se leen desde .env (copia de .env.example).
+spring:
+  application:
+    name: fleetops-document-service
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    hikari:
+      # Con la base de datos caída, responder 503 en menos de 2 s (DAS sec. 4.2 y 10)
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS}
+      validation-timeout: ${DB_VALIDATION_TIMEOUT_MS}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Sin migraciones en esta versión: el esquema no se crea ni se modifica desde la aplicación
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  jackson:
+    # Datos en snake_case (DAS sec. 6) y marcas de tiempo ISO 8601 en UTC (DAS sec. 7)
+    property-naming-strategy: SNAKE_CASE
+    time-zone: UTC
+  mvc:
+    problemdetails:
+      enabled: true
+
+server:
+  port: ${SERVER_PORT}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      # Expone el health en GET /health (DAS sec. 7, HU-DOC-11)
+      base-path: /
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  structured:
+    # Logs JSON por salida estándar, con correlation_id desde el MDC (DAS sec. 10)
+    format:
+      console: ecs
+  level:
+    root: ${LOG_LEVEL}
+
+fleetops:
+  documents:
+    # Zona horaria de la «fecha actual» de negocio (DAS sec. 5, ADR-DOC-01)
+    business-time-zone: ${BUSINESS_TIME_ZONE}
+    # Umbrales de alerta en días, validados al arrancar (ADR-DOC-09)
+    alert-threshold-days: ${ALERT_THRESHOLD_DAYS}

@@ -1,0 +1,64 @@
+# Arranque aislado del servicio de Documentación y Seguros (HU-DOC-11, DAS sec. 10).
+# Todas las variables vienen de .env (copia de .env.example).
+# Sin broker: está por definir entre Apache Kafka y AWS SNS + SQS (ADR-DOC-12).
+
+name: fleetops-documents
+
+services:
+  documents-db:
+    image: postgres:18.6-alpine3.24
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      # PostgreSQL 18+ espera el volumen en /var/lib/postgresql
+      - documents-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - documents-net
+    # Sin puertos publicados: solo el backend accede a la base de datos (DAS sec. 5)
+    restart: unless-stopped
+
+  documents-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      documents-db:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: ${SERVER_PORT}
+      DB_HOST: documents-db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_CONNECTION_TIMEOUT_MS: ${DB_CONNECTION_TIMEOUT_MS}
+      DB_VALIDATION_TIMEOUT_MS: ${DB_VALIDATION_TIMEOUT_MS}
+      BUSINESS_TIME_ZONE: ${BUSINESS_TIME_ZONE}
+      ALERT_THRESHOLD_DAYS: ${ALERT_THRESHOLD_DAYS}
+      LOG_LEVEL: ${LOG_LEVEL}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS}
+    ports:
+      - "${SERVICE_HOST_PORT}:${SERVER_PORT}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:$${SERVER_PORT}/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    networks:
+      - documents-net
+    restart: unless-stopped
+
+volumes:
+  documents-db-data:
+
+networks:
+  documents-net:
+    driver: bridge

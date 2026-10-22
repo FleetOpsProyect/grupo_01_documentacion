@@ -1,0 +1,34 @@
+# Control de versiones y entorno local
+.git
+.gitignore
+.gitattributes
+.env
+.env.*
+!.env.example
+
+# Artefactos de construcción y cachés
+.gradle
+build
+bin
+out
+coverage
+dist
+node_modules
+__pycache__
+*.log
+
+# Pruebas: no se ejecutan dentro de la imagen
+src/test
+
+# IDEs
+.idea
+.vscode
+*.iml
+
+# Documentación y material de trabajo
+context
+tmp
+*.md
+docker-compose.yml
+Dockerfile
+.dockerignore
