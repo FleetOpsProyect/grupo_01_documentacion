@@ -36,5 +36,16 @@ out/
 ### VS Code ###
 .vscode/
 
+### Entorno y secretos ###
+.env
+.env.*
+!.env.example
+
+### Logs, cobertura y artefactos ###
+*.log
+dist/
+coverage/
+node_modules/
+__pycache__/
 
 /tmp/*

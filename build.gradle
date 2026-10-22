@@ -18,16 +18,26 @@ repositories {
 }
 
 dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	// Adaptador de entrada REST (DAS sec. 7)
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
-	compileOnly 'org.projectlombok:lombok'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	// Adaptador de salida de persistencia: PostgreSQL con base de datos propia (DAS sec. 5)
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	runtimeOnly 'org.postgresql:postgresql'
-	annotationProcessor 'org.projectlombok:lombok'
+	// Salud y observabilidad: GET /health (HU-DOC-11)
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
-	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-	testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+tasks.named('bootJar') {
+	archiveFileName = 'app.jar'
+}
+
+tasks.named('jar') {
+	enabled = false
 }
 
 tasks.named('test') {
