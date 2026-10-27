@@ -6,8 +6,9 @@
  * <p><b>Patrones:</b> Adapter, Repository y Mapper dominio-JPA. Las entidades JPA están separadas de las
  * entidades de dominio.
  *
- * <p><b>Estado:</b> sin entidades en esta versión. Las migraciones del esquema se incorporarán después; la
- * aplicación no crea ni modifica el esquema ({@code ddl-auto: none}).
+ * <p><b>Estado:</b> implementado para HU-DOC-01 y HU-DOC-02: documentos, catálogo de tipos, réplicas (solo
+ * lectura), outbox y auditoría. El esquema lo crean los scripts de {@code database/} al iniciar PostgreSQL; la
+ * aplicación no lo modifica y al arrancar valida que las entidades coincidan con él ({@code ddl-auto: validate}).
  *
  * <p><b>Notas para la implementación:</b>
  * <ul>

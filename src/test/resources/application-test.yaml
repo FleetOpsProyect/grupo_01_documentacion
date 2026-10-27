@@ -9,8 +9,11 @@ spring:
       connection-timeout: 1500
       validation-timeout: 1000
   jpa:
-    # Hibernate no consulta los metadatos de la base de datos al arrancar
+    # Hibernate no consulta los metadatos de la base de datos al arrancar ni valida el esquema; la prueba de
+    # integración (DocumentRegistrationIT) sí lo valida contra PostgreSQL real
     database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: none
     properties:
       hibernate:
         boot:

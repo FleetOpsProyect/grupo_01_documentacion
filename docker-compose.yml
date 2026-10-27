@@ -1,6 +1,12 @@
 # Arranque aislado del servicio de Documentación y Seguros (HU-DOC-11, DAS sec. 10).
 # Todas las variables vienen de .env (copia de .env.example).
-# Sin broker: está por definir entre Apache Kafka y AWS SNS + SQS (ADR-DOC-12).
+# Mensajería: AWS SNS + SQS (ADR-DOC-12, ADR-DOC-14; decidido 26-10-2026). Este arquetipo todavía no
+# usa AWS: los eventos solo se escriben en el outbox (outbox_events, estado PENDING) y las réplicas de
+# vehículos y conductores se cargan con la semilla de desarrollo.
+#
+# Esquema: sin migraciones en esta versión. PostgreSQL ejecuta los scripts de database/ en orden
+# alfabético la PRIMERA vez que arranca con el volumen vacío. Para recrear la base desde cero:
+#   docker compose down -v && docker compose up --build
 
 name: fleetops-documents
 
@@ -14,14 +20,24 @@ services:
     volumes:
       # PostgreSQL 18+ espera el volumen en /var/lib/postgresql
       - documents-db-data:/var/lib/postgresql
+      # Creación del esquema document y del catálogo document_types (DAS sec. 14)
+      - ./database/document_schema.sql:/docker-entrypoint-initdb.d/01_document_schema.sql:ro
+      # Réplicas de desarrollo: vehículos y conductores de prueba (ADR-DOC-12). Nunca en producción
+      - ./database/document_seed_dev.sql:/docker-entrypoint-initdb.d/02_document_seed_dev.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      # Por TCP (127.0.0.1): mientras se ejecutan los scripts de initdb, PostgreSQL solo escucha por socket
+      # local, así que el servicio no arranca antes de que exista el esquema
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 3s
       retries: 10
     networks:
       - documents-net
-    # Sin puertos publicados: solo el backend accede a la base de datos (DAS sec. 5)
+    # Acceso desde un cliente de base de datos en esta máquina (DBeaver, pgAdmin, psql) para revisar los datos
+    # en desarrollo. Se publica solo en 127.0.0.1: no queda expuesto a la red. Ningún otro servicio de FleetOps
+    # accede a esta base (DAS sec. 5)
+    ports:
+      - "127.0.0.1:${DB_HOST_PORT}:5432"
     restart: unless-stopped
 
   documents-service:

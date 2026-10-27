@@ -3,7 +3,7 @@
 -- Script de creación del schema "document" (PostgreSQL 18+)
 --
 -- Fuente: DAS G01 (context/G01_DAS_Documentos.md), secciones 6 (modelo de dominio), 6.4 (datos propios),
---         9.2 (ADR-DOC-01 a 12) y 14 (MER).
+--         9.2 (ADR-DOC-01 a 14) y 14 (MER).
 --
 -- Script idempotente: se puede ejecutar varias veces sin error ni duplicados. Corre en una sola transacción.
 -- Todavía no se usan migraciones: este archivo es la referencia del esquema.
@@ -134,7 +134,8 @@ CREATE OR REPLACE FUNCTION document.fn_documents_check_type_rules()
     LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_type document.document_types%ROWTYPE;
+    v_type     document.document_types%ROWTYPE;
+    v_previous document.documents%ROWTYPE;
 BEGIN
     SELECT * INTO v_type FROM document.document_types WHERE code = NEW.document_type;
     IF NOT FOUND THEN
@@ -162,18 +163,96 @@ BEGIN
             USING ERRCODE = 'check_violation', CONSTRAINT = 'ck_documents_type_renewable';
     END IF;
 
+    -- Reglas de la renovación (ADR-DOC-04, ADR-DOC-11, DAS sec. 6.3). previous_document_id es inmodificable
+    -- (fn_documents_guard_changes), así que basta con validarlas al insertar.
+    IF TG_OP = 'INSERT' AND NEW.previous_document_id IS NOT NULL THEN
+        SELECT * INTO v_previous FROM document.documents WHERE document_id = NEW.previous_document_id;
+        IF FOUND THEN
+            IF v_previous.document_type <> NEW.document_type
+               OR v_previous.owner_type <> NEW.owner_type
+               OR v_previous.owner_id   <> NEW.owner_id THEN
+                RAISE EXCEPTION 'La renovación debe conservar el tipo y el propietario del documento anterior'
+                    USING ERRCODE = 'check_violation', CONSTRAINT = 'ck_documents_renewal_same_owner_type';
+            END IF;
+
+            -- ADR-DOC-11: el anterior pasa a REPLACED antes de insertar el nuevo, en la misma transacción.
+            -- Así tampoco se renueva un documento CANCELLED.
+            IF v_previous.status <> 'REPLACED' THEN
+                RAISE EXCEPTION 'El documento anterior debe estar en REPLACED antes de insertar la renovación (estado actual: %)',
+                    v_previous.status
+                    USING ERRCODE = 'check_violation', CONSTRAINT = 'ck_documents_renewal_previous_replaced';
+            END IF;
+
+            -- La nueva expiration_date es posterior a la del anterior. Que además sea futura depende de la fecha
+            -- de negocio (ADR-DOC-13) y la valida la aplicación.
+            IF v_previous.expiration_date IS NOT NULL
+               AND NEW.expiration_date <= v_previous.expiration_date THEN
+                RAISE EXCEPTION 'La nueva expiration_date (%) debe ser posterior a la del documento anterior (%)',
+                    NEW.expiration_date, v_previous.expiration_date
+                    USING ERRCODE = 'check_violation', CONSTRAINT = 'ck_documents_renewal_expiration_later';
+            END IF;
+        END IF;
+        -- Si el anterior no existe, la FK fk_documents_previous_document rechaza el registro
+    END IF;
+
     RETURN NEW;
 END;
 $$;
 
 COMMENT ON FUNCTION document.fn_documents_check_type_rules() IS
-    'Valida las reglas por tipo leídas del catálogo document_types (ADR-DOC-10).';
+    'Valida las reglas por tipo leídas del catálogo document_types (ADR-DOC-10) y las de la renovación (ADR-DOC-04).';
 
 CREATE OR REPLACE TRIGGER trg_documents_check_type_rules
     BEFORE INSERT OR UPDATE OF document_type, expiration_date, previous_document_id
     ON document.documents
     FOR EACH ROW
     EXECUTE FUNCTION document.fn_documents_check_type_rules();
+
+-- Integridad de los datos legales (DAS sec. 4.2 «Integridad», sec. 6.2 y 6.3, ADR-DOC-08):
+--   * document_type, owner_type, owner_id y previous_document_id no se modifican.
+--   * REPLACED y CANCELLED son estados finales: el documento ya no se modifica.
+--   * Nunca hay borrado físico: se usa la anulación lógica.
+CREATE OR REPLACE FUNCTION document.fn_documents_guard_changes()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'Los documentos no se borran físicamente; use la anulación (ADR-DOC-08)'
+            USING ERRCODE = 'restrict_violation', CONSTRAINT = 'ck_documents_no_physical_delete';
+    END IF;
+
+    IF OLD.status IN ('REPLACED', 'CANCELLED') THEN
+        RAISE EXCEPTION 'El documento % está en %, un estado final, y no se puede modificar', OLD.document_id, OLD.status
+            USING ERRCODE = 'check_violation', CONSTRAINT = 'ck_documents_final_status';
+    END IF;
+
+    IF NEW.document_type        IS DISTINCT FROM OLD.document_type
+       OR NEW.owner_type        IS DISTINCT FROM OLD.owner_type
+       OR NEW.owner_id          IS DISTINCT FROM OLD.owner_id
+       OR NEW.previous_document_id IS DISTINCT FROM OLD.previous_document_id THEN
+        RAISE EXCEPTION 'document_type, owner_type, owner_id y previous_document_id no se pueden modificar'
+            USING ERRCODE = 'check_violation', CONSTRAINT = 'ck_documents_immutable_fields';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+COMMENT ON FUNCTION document.fn_documents_guard_changes() IS
+    'Campos inmodificables, estados finales y prohibición de borrado físico (DAS sec. 6.2 y 6.3, ADR-DOC-08).';
+
+CREATE OR REPLACE TRIGGER trg_documents_guard_update
+    BEFORE UPDATE
+    ON document.documents
+    FOR EACH ROW
+    EXECUTE FUNCTION document.fn_documents_guard_changes();
+
+CREATE OR REPLACE TRIGGER trg_documents_prevent_delete
+    BEFORE DELETE
+    ON document.documents
+    FOR EACH ROW
+    EXECUTE FUNCTION document.fn_documents_guard_changes();
 
 -- =====================================================================================================
 -- 3. AUDITORÍA DE DOCUMENTOS (DAS sec. 4.2 «Responsabilidad», sec. 6.4)
@@ -224,7 +303,8 @@ CREATE TABLE IF NOT EXISTS document.outbox_events (
     CONSTRAINT fk_outbox_events_document FOREIGN KEY (aggregate_id)
         REFERENCES document.documents (document_id),
     CONSTRAINT ck_outbox_events_event_type CHECK (
-        event_type IN ('document.registered', 'document.expiring_soon', 'document.expired', 'document.renewed')
+        event_type IN ('document_registered_event', 'document_expiring_soon_event', 'document_expired_event',
+                        'document_renewed_event')
     ),
     CONSTRAINT ck_outbox_events_status CHECK (status IN ('PENDING', 'PUBLISHED', 'FAILED')),
     CONSTRAINT ck_outbox_events_published CHECK ((status = 'PUBLISHED') = (published_at IS NOT NULL)),
@@ -233,9 +313,11 @@ CREATE TABLE IF NOT EXISTS document.outbox_events (
 );
 
 COMMENT ON TABLE  document.outbox_events IS
-    'Eventos guardados en la misma transacción que el cambio (ADR-DOC-05). No se publican hasta definir el broker (ADR-DOC-12).';
+    'Eventos guardados en la misma transacción que el cambio (ADR-DOC-05). Se publican en AWS SNS, tópico fleetops_documents_events, tras el commit (ADR-DOC-12, ADR-DOC-14).';
 COMMENT ON COLUMN document.outbox_events.event_id    IS 'event_id del sobre; determinista en los eventos del job (DAS sec. 8.1).';
-COMMENT ON COLUMN document.outbox_events.message_key IS 'owner_id: clave de partición del topic (DAS sec. 5).';
+COMMENT ON COLUMN document.outbox_events.event_type  IS 'Valor del Message Attribute event_type en SNS, snake_case terminado en _event (ADR-DOC-14).';
+COMMENT ON COLUMN document.outbox_events.topic       IS 'Tópico SNS de destino: fleetops_documents_events (ADR-DOC-14). Sin uso de particionado (SNS estándar, no FIFO).';
+COMMENT ON COLUMN document.outbox_events.message_key IS 'owner_id: viaja en el payload, no como clave de partición (SNS estándar, no FIFO; ver riesgo DAS sec. 11).';
 COMMENT ON COLUMN document.outbox_events.payload     IS 'Sobre estándar completo; nunca incluye document_number (DAS sec. 4.2).';
 
 -- Lectura del publicador: eventos pendientes en orden de creación
@@ -331,7 +413,7 @@ CREATE TABLE IF NOT EXISTS document.vehicle_replica (
 );
 
 COMMENT ON TABLE  document.vehicle_replica IS 'Réplica mínima de Vehículos alimentada por eventos (DAS sec. 6.4).';
-COMMENT ON COLUMN document.vehicle_replica.is_active     IS 'FALSE tras vehicle.decommissioned: deja de ser propietario válido.';
+COMMENT ON COLUMN document.vehicle_replica.is_active     IS 'FALSE tras vehicle_decommissioned_event: deja de ser propietario válido.';
 COMMENT ON COLUMN document.vehicle_replica.last_event_at IS 'occurred_at del último evento aplicado; descarta eventos más antiguos.';
 
 CREATE TABLE IF NOT EXISTS document.driver_replica (
@@ -346,7 +428,7 @@ CREATE TABLE IF NOT EXISTS document.driver_replica (
 );
 
 COMMENT ON TABLE  document.driver_replica IS 'Réplica mínima de Conductores alimentada por eventos (DAS sec. 6.4).';
-COMMENT ON COLUMN document.driver_replica.is_active     IS 'FALSE tras driver.deactivated: deja de ser propietario válido.';
+COMMENT ON COLUMN document.driver_replica.is_active     IS 'FALSE tras driver_deactivated_event: deja de ser propietario válido.';
 COMMENT ON COLUMN document.driver_replica.last_event_at IS 'occurred_at del último evento aplicado; descarta eventos más antiguos.';
 
 -- =====================================================================================================
