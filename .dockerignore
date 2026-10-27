@@ -28,6 +28,9 @@ src/test
 # Documentación y material de trabajo
 context
 tmp
+docs
+# Scripts SQL: los ejecuta el contenedor de PostgreSQL (montados por docker-compose), no la imagen del servicio
+database
 *.md
 docker-compose.yml
 Dockerfile

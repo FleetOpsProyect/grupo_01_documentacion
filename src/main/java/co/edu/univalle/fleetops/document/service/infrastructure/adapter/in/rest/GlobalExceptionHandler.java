@@ -1,7 +1,9 @@
 package co.edu.univalle.fleetops.document.service.infrastructure.adapter.in.rest;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +38,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
 	private static final String DETAILS_PROPERTY = "detalles";
+
+	private static final Pattern CAMEL_CASE_BOUNDARY = Pattern.compile("([a-z0-9])([A-Z])");
 
 	@ExceptionHandler(BusinessRuleViolationException.class)
 	ProblemDetail handleBusinessRuleViolation(BusinessRuleViolationException ex) {
@@ -75,7 +79,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		List<Map<String, String>> details = ex.getBindingResult()
 			.getFieldErrors()
 			.stream()
-			.map(error -> Map.of("campo", error.getField(), "mensaje", String.valueOf(error.getDefaultMessage())))
+			.map(error -> Map.of("campo", toSnakeCase(error.getField()), "mensaje",
+					String.valueOf(error.getDefaultMessage())))
 			.toList();
 		ProblemDetail body = problem(HttpStatus.UNPROCESSABLE_CONTENT, "Datos inválidos",
 				"La solicitud tiene campos que no cumplen las validaciones.");
@@ -105,6 +110,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		ProblemDetail body = problem(HttpStatus.NOT_FOUND, "Recurso no encontrado",
 				"La ruta '/" + ex.getResourcePath() + "' no existe.");
 		return ResponseEntity.status(HttpStatus.NOT_FOUND).headers(headers).body(body);
+	}
+
+	/**
+	 * Los DTO usan camelCase en Java y snake_case en JSON: el detalle por campo debe nombrar el campo del contrato.
+	 */
+	static String toSnakeCase(String field) {
+		return CAMEL_CASE_BOUNDARY.matcher(field).replaceAll("$1_$2").toLowerCase(Locale.ROOT);
 	}
 
 	private static ProblemDetail problem(HttpStatus status, String title, String detail) {

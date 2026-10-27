@@ -16,10 +16,13 @@ spring:
   jpa:
     open-in-view: false
     hibernate:
-      # Sin migraciones en esta versión: el esquema no se crea ni se modifica desde la aplicación
-      ddl-auto: none
+      # El esquema lo crean los scripts de database/ al iniciar el contenedor de PostgreSQL (sin migraciones en
+      # esta versión). La aplicación no lo modifica: solo valida al arrancar que las entidades coinciden con él
+      ddl-auto: validate
     properties:
       hibernate:
+        # Todas las tablas viven en el schema document (DAS sec. 6.4)
+        default_schema: document
         jdbc:
           time_zone: UTC
   jackson:

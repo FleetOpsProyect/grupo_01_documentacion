@@ -1,5 +1,6 @@
 plugins {
 	id 'java'
+	id 'jacoco'
 	id 'org.springframework.boot' version '4.1.1'
 	id 'io.spring.dependency-management' version '1.1.7'
 }
@@ -29,6 +30,10 @@ dependencies {
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	// Prueba de integración contra PostgreSQL real con los scripts de database/ (DAS sec. 10)
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+	testImplementation 'org.testcontainers:testcontainers-postgresql'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -42,4 +47,49 @@ tasks.named('jar') {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	finalizedBy 'jacocoTestReport'
+}
+
+// Cobertura: 100 % de líneas y ramas en las capas de dominio y aplicación (núcleo hexagonal)
+jacoco {
+	toolVersion = '0.8.14'
+}
+
+def coreClasses = ['co/edu/univalle/fleetops/document/service/domain/**',
+				   'co/edu/univalle/fleetops/document/service/application/**']
+
+tasks.named('jacocoTestReport') {
+	dependsOn 'test'
+	reports {
+		xml.required = true
+		html.required = true
+	}
+	classDirectories.setFrom(files(classDirectories.files.collect {
+		fileTree(dir: it, includes: coreClasses)
+	}))
+}
+
+tasks.named('jacocoTestCoverageVerification') {
+	dependsOn 'test'
+	classDirectories.setFrom(files(classDirectories.files.collect {
+		fileTree(dir: it, includes: coreClasses)
+	}))
+	violationRules {
+		rule {
+			limit {
+				counter = 'LINE'
+				value = 'COVEREDRATIO'
+				minimum = 1.0
+			}
+			limit {
+				counter = 'BRANCH'
+				value = 'COVEREDRATIO'
+				minimum = 1.0
+			}
+		}
+	}
+}
+
+tasks.named('check') {
+	dependsOn 'jacocoTestCoverageVerification'
 }
