@@ -2,7 +2,7 @@ name: Deploy documents-service to EC2
 
 on:
   push:
-    branches: [main, feature/cd-pipeline] # TODO: quitar feature/cd-pipeline cuando terminen las pruebas
+    branches: [main]
   workflow_dispatch:
 
 permissions:
