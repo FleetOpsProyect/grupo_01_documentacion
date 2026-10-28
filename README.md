@@ -37,7 +37,7 @@ El servicio espera a que la base esté sana y, al arrancar, valida que sus entid
 Para comprobar que el servicio está arriba:
 
 ```bash
-curl -i http://localhost:8080/health
+curl -i http://localhost:8081/health
 ```
 
 Si cambió `SERVICE_HOST_PORT` en `.env`, use ese puerto.
@@ -57,19 +57,19 @@ La semilla trae estos propietarios:
 Registrar el SOAT del vehículo ABC123 (responde `201 Created` con `Location: /documents/{id}`):
 
 ```bash
-curl -i -X POST http://localhost:8080/documents -H "Content-Type: application/json" -d '{"document_type":"SOAT","owner_type":"VEHICLE","owner_id":"01960000-0000-7000-8000-000000000001","document_number":"AT-1300-0045-2026","issuing_entity":"Seguros Demo S.A.","issue_date":"2026-10-01","expiration_date":"2027-09-30"}'
+curl -i -X POST http://localhost:8081/documents -H "Content-Type: application/json" -d '{"document_type":"SOAT","owner_type":"VEHICLE","owner_id":"01960000-0000-7000-8000-000000000001","document_number":"AT-1300-0045-2026","issuing_entity":"Seguros Demo S.A.","issue_date":"2026-10-01","expiration_date":"2027-09-30"}'
 ```
 
 Registrar su tarjeta de propiedad, que no vence:
 
 ```bash
-curl -i -X POST http://localhost:8080/documents -H "Content-Type: application/json" -d '{"document_type":"PROPERTY_CARD","owner_type":"VEHICLE","owner_id":"01960000-0000-7000-8000-000000000001","document_number":"TP-998877","issuing_entity":"Transito de Cali","issue_date":"2020-05-10"}'
+curl -i -X POST http://localhost:8081/documents -H "Content-Type: application/json" -d '{"document_type":"PROPERTY_CARD","owner_type":"VEHICLE","owner_id":"01960000-0000-7000-8000-000000000001","document_number":"TP-998877","issuing_entity":"Transito de Cali","issue_date":"2020-05-10"}'
 ```
 
 Registrar la licencia del conductor activo, con una sola categoría:
 
 ```bash
-curl -i -X POST http://localhost:8080/documents -H "Content-Type: application/json" -d '{"document_type":"DRIVER_LICENSE","owner_type":"DRIVER","owner_id":"01960000-0000-7000-8000-000000000101","document_number":"LIC-1020304050","issuing_entity":"Secretaria de Movilidad de Cali","issue_date":"2024-03-01","expiration_date":"2034-03-01","license_category":"C1"}'
+curl -i -X POST http://localhost:8081/documents -H "Content-Type: application/json" -d '{"document_type":"DRIVER_LICENSE","owner_type":"DRIVER","owner_id":"01960000-0000-7000-8000-000000000101","document_number":"LIC-1020304050","issuing_entity":"Secretaria de Movilidad de Cali","issue_date":"2024-03-01","expiration_date":"2034-03-01","license_category":"C1"}'
 ```
 
 Ver los eventos que quedaron en el outbox:

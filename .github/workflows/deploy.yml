@@ -1,0 +1,118 @@
+name: Deploy documents-service to EC2
+
+on:
+  push:
+    branches: [main, feature/cd-pipeline] # TODO: quitar feature/cd-pipeline cuando terminen las pruebas
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/fleetopsproyect/fleetops-documents
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Desplegar por SSM
+        env:
+          SHA: ${{ github.sha }}
+          INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          HEADER=$(printf 'SHA=%q\nREPO_URL=%q\n' "$SHA" "$REPO_URL")
+
+          SCRIPT=$(cat <<'EOF'
+          set -euo pipefail
+          export HOME=/root
+          APP_DIR=/opt/fleetops/documents/app
+          if [ ! -d "$APP_DIR/.git" ]; then git clone --depth 1 "$REPO_URL" "$APP_DIR"; fi
+          cd "$APP_DIR"
+          git fetch --depth 1 origin "$SHA"
+          git checkout --force FETCH_HEAD
+          ln -sf /opt/fleetops/documents/.env "$APP_DIR/.env"
+          export DOCUMENTS_IMAGE="ghcr.io/fleetopsproyect/fleetops-documents:$SHA"
+          docker compose pull documents-service
+          docker compose up -d --no-build
+          for i in $(seq 1 30); do
+            if curl -fs -o /dev/null http://localhost:8081/health; then
+              echo "Servicio saludable"
+              docker image prune -f
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose ps
+          docker compose logs --tail 50 documents-service
+          exit 1
+          EOF
+          )
+
+          PARAMS=$(jq -n --arg s "$HEADER"$'\n'"$SCRIPT" '{commands: [$s]}')
+
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${SHA::7}" \
+            --parameters "$PARAMS" \
+            --query Command.CommandId --output text)
+
+          STATUS=Pending
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" \
+              --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 10
+          done
+
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
+            --query StandardOutputContent --output text
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
+            --query StandardErrorContent --output text
+          test "$STATUS" = "Success"

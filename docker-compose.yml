@@ -41,6 +41,7 @@ services:
     restart: unless-stopped
 
   documents-service:
+    image: ${DOCUMENTS_IMAGE:-fleetops-documents:local}
     build:
       context: .
       dockerfile: Dockerfile

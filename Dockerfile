@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---------- Etapa de construcción ----------
-FROM eclipse-temurin:21.0.12.1_1-jdk-alpine-3.24 AS builder
+FROM --platform=$BUILDPLATFORM eclipse-temurin:21.0.12.1_1-jdk-alpine-3.24 AS builder
 WORKDIR /workspace
 
 # Primero el wrapper y los descriptores, para reutilizar la caché de dependencias
