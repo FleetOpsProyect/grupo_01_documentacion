@@ -1,6 +1,6 @@
 # **DAS – Servicio de Documentación y Seguros (FleetOps)**
 
-*Equipo Documentación y Seguros · Versión 0.3 · Octubre 2026*
+*Equipo Documentación y Seguros · Versión 0.4 · Octubre 2026*
 
 **Registro de cambios**
 
@@ -9,6 +9,7 @@
 | 0.1 | Octubre 2026 | Versión inicial |
 | 0.2 | 26-10-2026 | (1) El modelo de datos de las secciones 6 y 7 prevalece sobre el MER; el MER se alinea con los cuatro tipos, sin campos de póliza. (2) La licencia guarda una sola categoría (license\_category); se corrige ADR-DOC-07. (3) La fecha de negocio se calcula en America/Bogota (nuevo ADR-DOC-13; cierra el punto abierto 4). (4) Otros cambios incorporados en esta versión: broker por definir entre Kafka y AWS SNS + SQS (ADR-DOC-12, punto abierto 16); regla única de cálculo del estado (6.2); réplicas con is\_active y consumo de bajas (punto 12); PostgreSQL 18 con el schema document y detalle físico del modelo (14.1 a 14.4) |
 | 0.3 | 26-10-2026 | Decisión del equipo FleetOps: el broker es **AWS SNS + SQS** (ADR-DOC-12, resuelto; cierra el punto abierto 16). Se agrega ADR-DOC-14 con la nomenclatura (tópicos, colas y tipos de evento en snake\_case e inglés, Message Attribute `event_type`) y se reescribe la sección 8. `document_registered_event` pasa a publicarse siempre que un documento se registra con éxito (antes ninguna HU lo contemplaba). Se confirma que una corrección (PATCH) puede dejar un documento EXPIRED (publica `document_expired_event`) o reactivarlo (publica `document_renewed_event` con `origin: CORRECTION`; cierra el punto abierto 11). Se confirma que anular un documento no publica ningún evento y el bloqueo permanece (riesgo abierto, sección 11) |
+| 0.4 | 28-10-2026 | La regla «tipo \+ document\_number únicos» (6.3) pasa a aplicarse solo entre los documentos no anulados: un documento CANCELLED (registrado por error) libera su número para registrarlo de nuevo, por ejemplo con el propietario correcto, ya que owner\_id no se puede corregir con PATCH. REPLACED sigue reservando el número. uk\_documents\_type\_number pasa de restricción UNIQUE a índice único parcial (14.2 y 14.3) |
 
 ## **1\. Introducción y alcance**
 
@@ -143,7 +144,7 @@ El día del vencimiento el documento está EXPIRING\_SOON con days\_remaining 0 
 
 ### **6.3 Reglas de negocio clave**
 
-* La combinación tipo \+ document\_number es única.  
+* La combinación tipo \+ document\_number es única entre los documentos no anulados. Un documento CANCELLED libera su número: se registró por error y puede registrarse de nuevo, por ejemplo con el propietario correcto. REPLACED lo sigue reservando, porque una renovación trae un número nuevo (v0.4).  
 * Un propietario tiene como máximo un documento activo por tipo: un vehículo, un SOAT, una tecnomecánica y una tarjeta de propiedad; un conductor, una licencia. Para cambiar de documento se usa la renovación.  
 * expiration\_date es obligatoria para SOAT, tecnomecánica y licencia, y debe ser posterior a issue\_date; en la tarjeta de propiedad va vacía.  
 * license\_category es obligatoria en DRIVER\_LICENSE (una sola categoría por licencia) y va vacía en los documentos de vehículo.  
@@ -346,10 +347,10 @@ erDiagram
 
     documents {
         uuid document_id PK "default uuidv7()"
-        varchar(30) document_type FK "document_types.code; UK with document_number"
+        varchar(30) document_type FK "document_types.code; UK with document_number when not CANCELLED"
         varchar(10) owner_type FK "VEHICLE or DRIVER; FK (document_type, owner_type)"
         uuid owner_id "logical ref to replica"
-        varchar(50) document_number UK "not blank; UK with document_type"
+        varchar(50) document_number UK "not blank; UK with document_type when not CANCELLED"
         varchar(150) issuing_entity "not null, not blank"
         date issue_date "not null"
         date expiration_date "null only for PROPERTY_CARD; after issue_date"
@@ -452,7 +453,7 @@ erDiagram
 | :---- | :---- | :---- | :---- |
 | document\_types | ck\_document\_types\_owner\_type | owner\_type en VEHICLE o DRIVER | 6.1 |
 | document\_types | ck\_document\_types\_renewable\_requires\_expiration | Un tipo sin vencimiento no se renueva | 6.2 |
-| documents | uk\_documents\_type\_number | document\_type + document\_number únicos | 6.3 |
+| documents | uk\_documents\_type\_number (índice único parcial) | document\_type + document\_number únicos cuando status no es CANCELLED | 6.3 |
 | documents | uk\_documents\_one\_active\_per\_owner\_type (índice único parcial) | (owner\_type, owner\_id, document\_type) únicos cuando status está en VALID, EXPIRING\_SOON o EXPIRED | ADR-DOC-11 |
 | documents | ck\_documents\_status | status en VALID, EXPIRING\_SOON, EXPIRED, REPLACED o CANCELLED | 6.2 |
 | documents | ck\_documents\_expiration\_after\_issue | expiration\_date posterior a issue\_date | 6.3 |
@@ -476,6 +477,7 @@ erDiagram
 
 | Índice | Columnas | Uso |
 | :---- | :---- | :---- |
+| uk\_documents\_type\_number | documents (document\_type, document\_number), parcial en status distinto de CANCELLED | Unicidad del número entre documentos no anulados (6.3) |
 | uk\_documents\_one\_active\_per\_owner\_type | documents (owner\_type, owner\_id, document\_type), parcial en estados activos | Restricción de ADR-DOC-11 |
 | ix\_documents\_owner | documents (owner\_type, owner\_id) | Listado por propietario y cumplimiento (HU-DOC-03 y 09) |
 | ix\_documents\_active\_expiration | documents (expiration\_date), parcial en documentos activos con vencimiento | Job de vigencia y próximos a vencer (HU-DOC-06, 07 y 08) |

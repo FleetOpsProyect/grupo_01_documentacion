@@ -22,4 +22,13 @@ public enum DocumentStatus {
 		return this == VALID || this == EXPIRING_SOON || this == EXPIRED;
 	}
 
+	/**
+	 * Un documento que reserva su número impide registrar otro con el mismo tipo + document_number (DAS sec. 6.3).
+	 * Solo CANCELLED lo libera: el documento se registró por error y puede registrarse de nuevo, por ejemplo con el
+	 * propietario correcto. REPLACED lo sigue reservando, porque una renovación trae un número nuevo.
+	 */
+	public boolean reservesDocumentNumber() {
+		return this != CANCELLED;
+	}
+
 }

@@ -104,9 +104,9 @@ public final class RegisterDocumentService implements RegisterDocumentUseCase {
 	}
 
 	private void checkUniqueness(Document document) {
-		if (this.documents.existsByTypeAndNumber(document.documentType(), document.documentNumber())) {
+		if (this.documents.existsNotCancelledByTypeAndNumber(document.documentType(), document.documentNumber())) {
 			throw new DomainConflictException(
-					"Ya existe un documento " + document.documentType() + " con ese document_number");
+					"Ya existe un documento " + document.documentType() + " no anulado con ese document_number");
 		}
 		if (this.documents.existsActiveByOwnerAndType(document.owner(), document.documentType())) {
 			throw new DomainConflictException("El propietario ya tiene un documento " + document.documentType()

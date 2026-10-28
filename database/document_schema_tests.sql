@@ -81,12 +81,26 @@ VALUES
     ('TECHNICAL_INSPECTION', 'VEHICLE', '00000000-0000-7000-8000-000000000f01', 'TEST-RTM-2', 'CDA Demo', '2026-02-01', '2027-02-01', 'VALID');
 DO $$ BEGIN RAISE NOTICE 'OK  acepta: nueva tecnomecánica tras anular la anterior'; END $$;
 
+-- El número de un documento anulado queda libre: se registra de nuevo para otro propietario (DAS sec. 6.3, v0.4)
+INSERT INTO document.documents
+    (document_type, owner_type, owner_id, document_number, issuing_entity, issue_date, expiration_date, status)
+VALUES
+    ('TECHNICAL_INSPECTION', 'VEHICLE', '00000000-0000-7000-8000-000000000f02', 'TEST-RTM-1', 'CDA Demo', '2026-01-01', '2027-01-01', 'VALID');
+DO $$ BEGIN RAISE NOTICE 'OK  acepta: mismo tipo + número de un documento anulado'; END $$;
+
 -- -----------------------------------------------------------------------------------------------------
 -- 2. documents: unicidad (DAS sec. 6.3, ADR-DOC-04, ADR-DOC-11)
 -- -----------------------------------------------------------------------------------------------------
+-- TEST-SOAT-1 está en REPLACED: un documento reemplazado sigue reservando su número
 SELECT pg_temp.expect_violation($q$
     INSERT INTO document.documents (document_type, owner_type, owner_id, document_number, issuing_entity, issue_date, expiration_date, status)
     VALUES ('SOAT', 'VEHICLE', '00000000-0000-7000-8000-000000000f02', 'TEST-SOAT-1', 'Otra', '2026-01-01', '2027-01-01', 'VALID')
+$q$, 'uk_documents_type_number');
+
+-- TEST-RTM-2 está activo (VALID) para otro vehículo
+SELECT pg_temp.expect_violation($q$
+    INSERT INTO document.documents (document_type, owner_type, owner_id, document_number, issuing_entity, issue_date, expiration_date, status)
+    VALUES ('TECHNICAL_INSPECTION', 'VEHICLE', '00000000-0000-7000-8000-000000000f03', 'TEST-RTM-2', 'Otra', '2026-01-01', '2027-01-01', 'VALID')
 $q$, 'uk_documents_type_number');
 
 SELECT pg_temp.expect_violation($q$

@@ -9,7 +9,8 @@ import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.pers
 
 public interface DocumentJpaRepository extends JpaRepository<DocumentJpaEntity, UUID> {
 
-	boolean existsByDocumentTypeAndDocumentNumber(String documentType, String documentNumber);
+	boolean existsByDocumentTypeAndDocumentNumberAndStatusIn(String documentType, String documentNumber,
+			Collection<String> statuses);
 
 	boolean existsByOwnerTypeAndOwnerIdAndDocumentTypeAndStatusIn(String ownerType, UUID ownerId,
 			String documentType, Collection<String> statuses);
