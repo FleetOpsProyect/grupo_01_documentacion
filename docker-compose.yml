@@ -33,11 +33,12 @@ services:
       retries: 10
     networks:
       - documents-net
-    # Acceso desde un cliente de base de datos en esta máquina (DBeaver, pgAdmin, psql) para revisar los datos
-    # en desarrollo. Se publica solo en 127.0.0.1: no queda expuesto a la red. Ningún otro servicio de FleetOps
-    # accede a esta base (DAS sec. 5)
+    # Acceso desde un cliente de base de datos (DBeaver, pgAdmin, psql) para revisar los datos. Por defecto se
+    # publica solo en 127.0.0.1: no queda expuesto a la red. Para permitir conexiones desde cualquier origen
+    # (demostración en EC2), defina DB_BIND_ADDRESS=0.0.0.0 en el .env y limite el origen en el security group.
+    # Ningún otro servicio de FleetOps accede a esta base (DAS sec. 5)
     ports:
-      - "127.0.0.1:${DB_HOST_PORT}:5432"
+      - "${DB_BIND_ADDRESS:-127.0.0.1}:${DB_HOST_PORT}:5432"
     restart: unless-stopped
 
   documents-service:
