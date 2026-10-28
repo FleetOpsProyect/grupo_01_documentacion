@@ -100,5 +100,6 @@ sonar {
         property "sonar.projectKey", "FleetOpsProyect_grupo_01_documentacion"
         property "sonar.organization", "fleetopsproyect-1"
         property "sonar.host.url", "https://sonarcloud.io"
+        property "sonar.coverage.jacoco.xmlReportPaths", "build/reports/jacoco/test/jacocoTestReport.xml"
     }
 }
