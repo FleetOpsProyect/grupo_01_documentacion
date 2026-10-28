@@ -28,7 +28,7 @@ jobs:
       run: chmod +x gradlew
 
     - name: Compilar y correr Pruebas (con cobertura)
-      run: ./gradlew build jacocoTestReport
+      run: ./gradlew clean build jacocoTestReport
 
     - name: Análisis con SonarCloud
       env:
