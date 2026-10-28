@@ -94,3 +94,11 @@ tasks.named('jacocoTestCoverageVerification') {
 tasks.named('check') {
 	dependsOn 'jacocoTestCoverageVerification'
 }
+
+sonar {
+    properties {
+        property "sonar.projectKey", "FleetOpsProyect_grupo_01_documentacion"
+        property "sonar.organization", "fleetopsproyect-1"
+        property "sonar.host.url", "https://sonarcloud.io"
+    }
+}
