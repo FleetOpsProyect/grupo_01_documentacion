@@ -3,6 +3,7 @@ plugins {
 	id 'jacoco'
 	id 'org.springframework.boot' version '4.1.1'
 	id 'io.spring.dependency-management' version '1.1.7'
+	id 'org.sonarqube' version '7.5.0.8588' 
 }
 
 group = 'co.edu.univalle'
@@ -92,4 +93,13 @@ tasks.named('jacocoTestCoverageVerification') {
 
 tasks.named('check') {
 	dependsOn 'jacocoTestCoverageVerification'
+}
+
+sonar {
+    properties {
+        property "sonar.projectKey", "FleetOpsProyect_grupo_01_documentacion"
+        property "sonar.organization", "fleetopsproyect-1"
+        property "sonar.host.url", "https://sonarcloud.io"
+        property "sonar.coverage.jacoco.xmlReportPaths", "build/reports/jacoco/test/jacocoTestReport.xml"
+    }
 }
