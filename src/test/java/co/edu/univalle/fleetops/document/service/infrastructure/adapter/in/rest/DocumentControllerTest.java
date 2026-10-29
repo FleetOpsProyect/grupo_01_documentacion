@@ -130,7 +130,8 @@ class DocumentControllerTest {
 
 	@Test
 	void should_respond_400_when_the_json_is_malformed() throws Exception {
-		this.mockMvc.perform(post("/documents").contentType(MediaType.APPLICATION_JSON).content("{ \"document_type\": "))
+		this.mockMvc
+			.perform(post("/documents").contentType(MediaType.APPLICATION_JSON).content("{ \"document_type\": "))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.title").value("Solicitud mal formada"));
 	}
