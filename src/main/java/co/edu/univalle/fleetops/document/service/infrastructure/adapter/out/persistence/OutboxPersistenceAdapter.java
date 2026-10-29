@@ -30,7 +30,8 @@ public class OutboxPersistenceAdapter implements OutboxRepository {
 
 	@Override
 	public void append(UUID eventId, DomainEvent event, UUID correlationId) {
-		String payload = this.jsonMapper.writeValueAsString(OutboxEnvelopeMapper.envelope(eventId, event, correlationId));
+		String payload = this.jsonMapper
+			.writeValueAsString(OutboxEnvelopeMapper.envelope(eventId, event, correlationId));
 		this.entityManager.persist(new OutboxEventJpaEntity(eventId, OutboxEnvelopeMapper.eventTypeOf(event),
 				OutboxEnvelopeMapper.TOPIC, event.owner().ownerId().toString(), event.documentId(), payload,
 				correlationId, event.occurredAt()));

@@ -6,6 +6,8 @@ package co.edu.univalle.fleetops.document.service.domain.exception;
  */
 public class DomainConflictException extends DomainException {
 
+	private static final long serialVersionUID = 1L;
+
 	public DomainConflictException(String message) {
 		super(message);
 	}

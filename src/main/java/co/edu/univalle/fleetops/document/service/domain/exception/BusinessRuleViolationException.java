@@ -5,6 +5,8 @@ package co.edu.univalle.fleetops.document.service.domain.exception;
  */
 public class BusinessRuleViolationException extends DomainException {
 
+	private static final long serialVersionUID = 1L;
+
 	public BusinessRuleViolationException(String message) {
 		super(message);
 	}
