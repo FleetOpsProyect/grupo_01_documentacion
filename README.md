@@ -155,7 +155,7 @@ Para generar el reporte de cobertura y verificar el mínimo:
 ./gradlew check
 ```
 
-`check` ejecuta las pruebas, genera el reporte de JaCoCo y **falla si la cobertura de líneas o de ramas de `domain` y `application` es menor al 100 %**. El reporte HTML queda en `build/reports/jacoco/test/html/index.html` y el XML en `build/reports/jacoco/test/jacocoTestReport.xml`.
+`check` ejecuta Checkstyle y las pruebas, genera el reporte de JaCoCo y **falla si la cobertura de líneas o de ramas de `domain` y `application` es menor al 100 %**. El reporte HTML queda en `build/reports/jacoco/test/html/index.html` y el XML en `build/reports/jacoco/test/jacocoTestReport.xml`.
 
 Las pruebas del esquema de base de datos, independientes de Java, están en `database/document_schema_tests.sql` y terminan con `ROLLBACK`. Con el stack de Docker arriba:
 
@@ -163,10 +163,22 @@ Las pruebas del esquema de base de datos, independientes de Java, están en `dat
 docker compose exec -T documents-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' < database/document_schema_tests.sql
 ```
 
+### Lint, typecheck e integración continua
+
+| Comando | Qué hace |
+| :-- | :-- |
+| `./gradlew lint` | Checkstyle sobre `src/main` y `src/test` con [`config/checkstyle/checkstyle.xml`](config/checkstyle/checkstyle.xml); falla con cualquier violación |
+| `./gradlew typecheck` | Compila el código principal y el de pruebas con `-Xlint:all -Werror`: toda advertencia del compilador es un error |
+| `./gradlew test jacocoTestCoverageVerification` | Pruebas y cobertura del 100 % en el núcleo |
+
+El workflow [`.github/workflows/ci-sonar.yml`](.github/workflows/ci-sonar.yml) ejecuta esos tres pasos y después el análisis de SonarCloud (con el XML de JaCoCo) en cada pull request y en cada push a `develop` y `main`. Publica los reportes de Checkstyle, pruebas y JaCoCo como artefacto `reportes`.
+
 ## 5. Estructura del proyecto
 
 ```
-├── build.gradle                 Spring Boot 4.1.1, Java 21, JaCoCo (100 % en el núcleo), Testcontainers
+├── .github/workflows/           ci-sonar.yml: lint, typecheck, pruebas y SonarCloud · deploy.yml: despliegue a EC2
+├── build.gradle                 Spring Boot 4.1.1, Java 21, JaCoCo (100 % en el núcleo), Testcontainers, Checkstyle
+├── config/checkstyle/           Reglas de estilo (tabulaciones al estilo de Spring, imports explícitos)
 ├── Dockerfile                   Multi-stage (JDK → JRE alpine), usuario no root, imágenes con versión fija
 ├── docker-compose.yml           PostgreSQL 18.6 que ejecuta database/*.sql al iniciar + servicio; red propia
 ├── .env.example                 Todas las variables documentadas

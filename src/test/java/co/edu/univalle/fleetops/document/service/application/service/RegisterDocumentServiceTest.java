@@ -239,12 +239,12 @@ class RegisterDocumentServiceTest {
 		givenIds(DOCUMENT_ID);
 		givenTheClock();
 		given(this.owners.isActiveOwner(VEHICLE)).willReturn(true);
-		given(this.documents.existsByTypeAndNumber(eq(DocumentTypeCode.SOAT), any())).willReturn(true);
+		given(this.documents.existsNotCancelledByTypeAndNumber(eq(DocumentTypeCode.SOAT), any())).willReturn(true);
 
 		// Act + Assert
 		assertThatExceptionOfType(DomainConflictException.class)
 			.isThrownBy(() -> this.service.register(soatCommand("AT-1", LocalDate.of(2027, 9, 30))))
-			.withMessage("Ya existe un documento SOAT con ese document_number");
+			.withMessage("Ya existe un documento SOAT no anulado con ese document_number");
 		verify(this.documents, never()).save(any());
 		verifyNoInteractions(this.auditLog, this.outbox);
 	}
@@ -256,7 +256,7 @@ class RegisterDocumentServiceTest {
 		givenIds(DOCUMENT_ID);
 		givenTheClock();
 		given(this.owners.isActiveOwner(VEHICLE)).willReturn(true);
-		given(this.documents.existsByTypeAndNumber(eq(DocumentTypeCode.SOAT), any())).willReturn(false);
+		given(this.documents.existsNotCancelledByTypeAndNumber(eq(DocumentTypeCode.SOAT), any())).willReturn(false);
 		given(this.documents.existsActiveByOwnerAndType(VEHICLE, DocumentTypeCode.SOAT)).willReturn(true);
 
 		// Act + Assert

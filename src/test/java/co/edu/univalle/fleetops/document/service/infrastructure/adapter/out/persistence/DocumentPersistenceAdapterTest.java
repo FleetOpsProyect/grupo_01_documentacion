@@ -57,13 +57,23 @@ class DocumentPersistenceAdapterTest {
 	}
 
 	@Test
+	void should_look_for_a_taken_number_in_every_status_except_cancelled() {
+		// Act
+		this.adapter.existsNotCancelledByTypeAndNumber(DocumentTypeCode.SOAT, new DocumentNumber("AT-1"));
+
+		// Assert (DAS sec. 6.3, v0.4: un documento anulado libera su número)
+		verify(this.repository).existsByDocumentTypeAndDocumentNumberAndStatusIn("SOAT", "AT-1",
+				List.of("VALID", "EXPIRING_SOON", "EXPIRED", "REPLACED"));
+	}
+
+	@Test
 	void should_translate_the_type_number_unique_constraint_to_a_conflict() {
 		// Arrange
 		given(this.repository.saveAndFlush(any())).willThrow(violation("uk_documents_type_number"));
 
 		// Act + Assert
 		assertThatExceptionOfType(DomainConflictException.class).isThrownBy(() -> this.adapter.save(soat()))
-			.withMessage("Ya existe un documento SOAT con ese document_number");
+			.withMessage("Ya existe un documento SOAT no anulado con ese document_number");
 	}
 
 	@Test

@@ -34,6 +34,11 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 		.map(Enum::name)
 		.toList();
 
+	private static final List<String> NUMBER_RESERVING_STATUSES = Arrays.stream(DocumentStatus.values())
+		.filter(DocumentStatus::reservesDocumentNumber)
+		.map(Enum::name)
+		.toList();
+
 	private final DocumentJpaRepository repository;
 
 	public DocumentPersistenceAdapter(DocumentJpaRepository repository) {
@@ -41,8 +46,9 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 	}
 
 	@Override
-	public boolean existsByTypeAndNumber(DocumentTypeCode documentType, DocumentNumber documentNumber) {
-		return this.repository.existsByDocumentTypeAndDocumentNumber(documentType.name(), documentNumber.value());
+	public boolean existsNotCancelledByTypeAndNumber(DocumentTypeCode documentType, DocumentNumber documentNumber) {
+		return this.repository.existsByDocumentTypeAndDocumentNumberAndStatusIn(documentType.name(),
+				documentNumber.value(), NUMBER_RESERVING_STATUSES);
 	}
 
 	@Override
@@ -65,7 +71,7 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 		String constraint = constraintName(ex);
 		if (UK_TYPE_NUMBER.equals(constraint)) {
 			return new DomainConflictException(
-					"Ya existe un documento " + document.documentType() + " con ese document_number");
+					"Ya existe un documento " + document.documentType() + " no anulado con ese document_number");
 		}
 		if (UK_ONE_ACTIVE_PER_OWNER_TYPE.equals(constraint)) {
 			return new DomainConflictException("El propietario ya tiene un documento " + document.documentType()

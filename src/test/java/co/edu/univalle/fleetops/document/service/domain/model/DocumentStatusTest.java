@@ -17,4 +17,14 @@ class DocumentStatusTest {
 		assertThat(active).isEqualTo(expected);
 	}
 
+	@ParameterizedTest
+	@CsvSource({ "VALID, true", "EXPIRING_SOON, true", "EXPIRED, true", "REPLACED, true", "CANCELLED, false" })
+	void should_release_the_document_number_only_when_cancelled(DocumentStatus status, boolean expected) {
+		// Act
+		boolean reserves = status.reservesDocumentNumber();
+
+		// Assert (DAS sec. 6.3, v0.4)
+		assertThat(reserves).isEqualTo(expected);
+	}
+
 }

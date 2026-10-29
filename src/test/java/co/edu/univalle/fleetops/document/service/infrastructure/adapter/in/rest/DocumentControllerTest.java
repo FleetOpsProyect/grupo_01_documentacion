@@ -130,7 +130,8 @@ class DocumentControllerTest {
 
 	@Test
 	void should_respond_400_when_the_json_is_malformed() throws Exception {
-		this.mockMvc.perform(post("/documents").contentType(MediaType.APPLICATION_JSON).content("{ \"document_type\": "))
+		this.mockMvc
+			.perform(post("/documents").contentType(MediaType.APPLICATION_JSON).content("{ \"document_type\": "))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.title").value("Solicitud mal formada"));
 	}
@@ -156,12 +157,12 @@ class DocumentControllerTest {
 	void should_respond_409_when_the_use_case_reports_a_conflict() throws Exception {
 		// Arrange
 		given(this.registerDocument.register(any()))
-			.willThrow(new DomainConflictException("Ya existe un documento SOAT con ese document_number"));
+			.willThrow(new DomainConflictException("Ya existe un documento SOAT no anulado con ese document_number"));
 
 		// Act + Assert
 		this.mockMvc.perform(post("/documents").contentType(MediaType.APPLICATION_JSON).content(SOAT_REQUEST))
 			.andExpect(status().isConflict())
-			.andExpect(jsonPath("$.detail").value("Ya existe un documento SOAT con ese document_number"));
+			.andExpect(jsonPath("$.detail").value("Ya existe un documento SOAT no anulado con ese document_number"));
 	}
 
 	@Test

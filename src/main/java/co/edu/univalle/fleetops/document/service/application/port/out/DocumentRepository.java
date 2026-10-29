@@ -11,9 +11,11 @@ import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
 public interface DocumentRepository {
 
 	/**
-	 * La combinación tipo + número es única (DAS sec. 6.3).
+	 * La combinación tipo + número es única entre los documentos que reservan su número, es decir, los no anulados
+	 * ({@link co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus#reservesDocumentNumber()},
+	 * DAS sec. 6.3).
 	 */
-	boolean existsByTypeAndNumber(DocumentTypeCode documentType, DocumentNumber documentNumber);
+	boolean existsNotCancelledByTypeAndNumber(DocumentTypeCode documentType, DocumentNumber documentNumber);
 
 	/**
 	 * Un propietario tiene como máximo un documento activo (VALID, EXPIRING_SOON o EXPIRED) por tipo (ADR-DOC-11).
