@@ -168,7 +168,41 @@ class DocumentRegistrationIT {
 			.perform(post("/documents").contentType(MediaType.APPLICATION_JSON)
 				.content(vehicleDocument("SOAT", newVehicle(true), number, TODAY.plusYears(1))))
 			.andExpect(status().isConflict())
-			.andExpect(jsonPath("$.detail").value("Ya existe un documento SOAT con ese document_number"));
+			.andExpect(jsonPath("$.detail").value("Ya existe un documento SOAT no anulado con ese document_number"));
+	}
+
+	@Test
+	void should_register_again_the_number_of_a_cancelled_document_for_the_right_owner() throws Exception {
+		// Arrange: registrado por error con el vehículo equivocado y anulado. La anulación (HU-DOC-04) aún no tiene
+		// endpoint, así que se simula con el mismo cambio de estado que hará el caso de uso
+		String number = uniqueNumber("SOAT");
+		UUID cancelled = registerAndGetId(vehicleDocument("SOAT", newVehicle(true), number, TODAY.plusYears(1)));
+		changeStatus(cancelled, "CANCELLED");
+
+		// Act + Assert
+		this.mockMvc
+			.perform(post("/documents").contentType(MediaType.APPLICATION_JSON)
+				.content(vehicleDocument("SOAT", newVehicle(true), number, TODAY.plusYears(1))))
+			.andExpect(status().isCreated());
+		assertThat(this.jdbc.queryForList(
+				"SELECT status FROM document.documents WHERE document_type = 'SOAT' AND document_number = ?",
+				String.class, number))
+			.containsExactlyInAnyOrder("CANCELLED", "VALID");
+	}
+
+	@Test
+	void should_keep_rejecting_with_409_the_number_of_a_replaced_document() throws Exception {
+		// Arrange: la renovación (HU-DOC-05) aún no tiene endpoint; se simula el estado REPLACED
+		String number = uniqueNumber("SOAT");
+		UUID replaced = registerAndGetId(vehicleDocument("SOAT", newVehicle(true), number, TODAY.plusYears(1)));
+		changeStatus(replaced, "REPLACED");
+
+		// Act + Assert
+		this.mockMvc
+			.perform(post("/documents").contentType(MediaType.APPLICATION_JSON)
+				.content(vehicleDocument("SOAT", newVehicle(true), number, TODAY.plusYears(1))))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.detail").value("Ya existe un documento SOAT no anulado con ese document_number"));
 	}
 
 	@Test
@@ -217,8 +251,26 @@ class DocumentRegistrationIT {
 	}
 
 	private void register(String body) throws Exception {
-		this.mockMvc.perform(post("/documents").contentType(MediaType.APPLICATION_JSON).content(body))
-			.andExpect(status().isCreated());
+		registerAndGetId(body);
+	}
+
+	private UUID registerAndGetId(String body) throws Exception {
+		MvcResult result = this.mockMvc
+			.perform(post("/documents").contentType(MediaType.APPLICATION_JSON).content(body))
+			.andExpect(status().isCreated())
+			.andReturn();
+		return UUID.fromString(result.getResponse().getHeader("Location").replace("/documents/", ""));
+	}
+
+	private void changeStatus(UUID documentId, String status) {
+		if ("CANCELLED".equals(status)) {
+			this.jdbc.update("UPDATE document.documents SET status = 'CANCELLED', cancelled_at = now(), "
+					+ "cancellation_reason = 'Registrado con la placa de otro vehículo' WHERE document_id = ?",
+					documentId);
+		}
+		else {
+			this.jdbc.update("UPDATE document.documents SET status = ? WHERE document_id = ?", status, documentId);
+		}
 	}
 
 	private UUID newVehicle(boolean active) {

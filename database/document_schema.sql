@@ -77,8 +77,6 @@ CREATE TABLE IF NOT EXISTS document.documents (
     CONSTRAINT fk_documents_previous_document FOREIGN KEY (previous_document_id)
         REFERENCES document.documents (document_id),
     CONSTRAINT uk_documents_previous_document UNIQUE (previous_document_id),
-    -- La combinación tipo + número es única (DAS sec. 6.3)
-    CONSTRAINT uk_documents_type_number UNIQUE (document_type, document_number),
 
     CONSTRAINT ck_documents_owner_type CHECK (owner_type IN ('VEHICLE', 'DRIVER')),
     CONSTRAINT ck_documents_status CHECK (status IN ('VALID', 'EXPIRING_SOON', 'EXPIRED', 'REPLACED', 'CANCELLED')),
@@ -111,6 +109,16 @@ COMMENT ON COLUMN document.documents.expiration_date IS 'Vacía solo en tipos si
 COMMENT ON COLUMN document.documents.status IS 'Estado guardado; VALID/EXPIRING_SOON/EXPIRED se recalculan por fecha en cada consulta (ADR-DOC-01).';
 COMMENT ON COLUMN document.documents.license_category IS 'Solo DRIVER_LICENSE: una única categoría por licencia (ADR-DOC-07).';
 COMMENT ON COLUMN document.documents.version IS 'Control de concurrencia optimista (ADR-DOC-04).';
+
+-- La combinación tipo + número es única entre los documentos no anulados (DAS sec. 6.3, v0.4). Un documento
+-- CANCELLED (registrado por error) libera su número para registrarlo de nuevo, por ejemplo con el propietario
+-- correcto. REPLACED sigue reservándolo: una renovación trae un número nuevo.
+-- Hasta v0.3 era una restricción UNIQUE sin condición con el mismo nombre; se elimina primero para que volver a
+-- ejecutar este script también actualice una base ya creada (si no, el índice nuevo no se crearía).
+ALTER TABLE document.documents DROP CONSTRAINT IF EXISTS uk_documents_type_number;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_documents_type_number
+    ON document.documents (document_type, document_number)
+    WHERE status <> 'CANCELLED';
 
 -- Un solo documento activo por propietario y tipo (ADR-DOC-11).
 -- Se considera activo un documento en VALID, EXPIRING_SOON o EXPIRED (DAS sec. 6.2).
