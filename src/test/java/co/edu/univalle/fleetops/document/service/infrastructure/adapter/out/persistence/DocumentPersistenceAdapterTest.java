@@ -21,6 +21,7 @@ import co.edu.univalle.fleetops.document.service.domain.model.DocumentNumber;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentRegistration;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeRules;
+import co.edu.univalle.fleetops.document.service.domain.model.LicenseCategory;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
 import co.edu.univalle.fleetops.document.service.domain.model.ValidityPeriod;
@@ -87,6 +88,16 @@ class DocumentPersistenceAdapterTest {
 	}
 
 	@Test
+	void should_translate_the_one_active_per_owner_constraint_for_a_license_to_a_renewal_conflict() {
+		// Arrange
+		given(this.repository.saveAndFlush(any())).willThrow(violation("uk_documents_one_active_per_owner_type"));
+
+		// Act + Assert (HU-DOC-02, criterio 5: dos registros simultáneos responden igual que la validación)
+		assertThatExceptionOfType(DomainConflictException.class).isThrownBy(() -> this.adapter.save(license()))
+			.withMessage("El conductor ya tiene una licencia vigente; use la renovación");
+	}
+
+	@Test
 	void should_rethrow_any_other_integrity_violation() {
 		// Arrange
 		DataIntegrityViolationException other = violation("ck_documents_license_category");
@@ -133,6 +144,17 @@ class DocumentPersistenceAdapterTest {
 	private static DataIntegrityViolationException violation(String constraint) {
 		return new DataIntegrityViolationException("violación",
 				new ConstraintViolationException("violación", new SQLException("23505"), constraint));
+	}
+
+	private static Document license() {
+		return Document.register(
+				new DocumentRegistration(UUID.fromString("019a2f4e-8b1c-7d2a-9e3f-1a2b3c4d5e70"),
+						new OwnerRef(OwnerType.DRIVER, UUID.fromString("01960000-0000-7000-8000-000000000101")),
+						new DocumentNumber("LIC-1"), "Secretaría de Movilidad de Cali",
+						new ValidityPeriod(LocalDate.of(2024, 3, 1), LocalDate.of(2034, 3, 1)),
+						new LicenseCategory("C1")),
+				new DocumentTypeRules(DocumentTypeCode.DRIVER_LICENSE, OwnerType.DRIVER, true, true, true, true),
+				new DocumentStatusCalculator(30), LocalDate.of(2026, 10, 26), Instant.parse("2026-10-26T15:04:05Z"));
 	}
 
 	private static Document soat() {

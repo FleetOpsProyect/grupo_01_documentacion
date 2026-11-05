@@ -74,8 +74,7 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 					"Ya existe un documento " + document.documentType() + " no anulado con ese document_number");
 		}
 		if (UK_ONE_ACTIVE_PER_OWNER_TYPE.equals(constraint)) {
-			return new DomainConflictException("El propietario ya tiene un documento " + document.documentType()
-					+ " activo. Para cambiarlo use la renovación");
+			return Document.activeDocumentConflict(document.documentType());
 		}
 		return ex;
 	}

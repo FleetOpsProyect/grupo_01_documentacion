@@ -15,6 +15,7 @@ import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpired;
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentRegistered;
 import co.edu.univalle.fleetops.document.service.domain.event.DomainEvent;
 import co.edu.univalle.fleetops.document.service.domain.exception.BusinessRuleViolationException;
+import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflictException;
 import co.edu.univalle.fleetops.document.service.domain.service.DocumentStatusCalculator;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -135,6 +136,25 @@ class DocumentTest {
 		}
 
 		@Test
+		void should_register_an_already_expired_driver_license_and_also_emit_document_expired() {
+			// Arrange
+			LocalDate yesterday = TODAY.minusDays(1);
+			DocumentRegistration registration = registration(DRIVER, yesterday, new LicenseCategory("C1"));
+
+			// Act
+			Document document = Document.register(registration, DRIVER_LICENSE, DocumentTest.this.calculator, TODAY,
+					NOW);
+
+			// Assert (HU-DOC-02, criterio 6)
+			assertThat(document.status()).isEqualTo(DocumentStatus.EXPIRED);
+			List<DomainEvent> events = document.pullDomainEvents();
+			assertThat(events).hasSize(2);
+			assertThat(events.get(0)).isInstanceOf(DocumentRegistered.class);
+			assertThat(events.get(1))
+				.isEqualTo(new DocumentExpired(DOCUMENT_ID, DocumentTypeCode.DRIVER_LICENSE, DRIVER, yesterday, NOW));
+		}
+
+		@Test
 		void should_strip_the_issuing_entity() {
 			// Arrange
 			DocumentRegistration registration = new DocumentRegistration(DOCUMENT_ID, VEHICLE,
@@ -180,11 +200,20 @@ class DocumentTest {
 		}
 
 		@Test
-		void should_reject_an_owner_that_does_not_match_the_type() {
+		void should_reject_a_vehicle_document_for_a_driver() {
 			assertThatExceptionOfType(BusinessRuleViolationException.class)
 				.isThrownBy(() -> Document.register(registration(DRIVER, LocalDate.of(2027, 9, 30), null), SOAT,
 						DocumentTest.this.calculator, TODAY, NOW))
-				.withMessage("El tipo de documento SOAT solo se registra para un propietario VEHICLE");
+				.withMessage("El tipo de documento no corresponde al tipo de propietario");
+		}
+
+		@Test
+		void should_reject_a_driver_license_for_a_vehicle() {
+			assertThatExceptionOfType(BusinessRuleViolationException.class)
+				.isThrownBy(() -> Document.register(
+						registration(VEHICLE, LocalDate.of(2034, 3, 1), new LicenseCategory("C1")), DRIVER_LICENSE,
+						DocumentTest.this.calculator, TODAY, NOW))
+				.withMessage("El tipo de documento no corresponde al tipo de propietario");
 		}
 
 		@Test
@@ -246,6 +275,30 @@ class DocumentTest {
 			assertThatExceptionOfType(BusinessRuleViolationException.class)
 				.isThrownBy(() -> Document.register(registration, SOAT, DocumentTest.this.calculator, TODAY, NOW))
 				.withMessage("issuing_entity no puede tener más de 150 caracteres");
+		}
+
+	}
+
+	@Nested
+	class WhenAnActiveDocumentAlreadyExists {
+
+		@Test
+		void should_ask_the_driver_to_renew_the_license() {
+			assertThat(Document.activeDocumentConflict(DocumentTypeCode.DRIVER_LICENSE))
+				.isInstanceOf(DomainConflictException.class)
+				.hasMessage("El conductor ya tiene una licencia vigente; use la renovación");
+		}
+
+		@Test
+		void should_ask_the_owner_to_renew_a_vehicle_document() {
+			assertThat(Document.activeDocumentConflict(DocumentTypeCode.SOAT))
+				.hasMessage("El propietario ya tiene un documento SOAT activo. Para cambiarlo use la renovación");
+		}
+
+		@Test
+		void should_reject_a_missing_document_type() {
+			assertThatNullPointerException().isThrownBy(() -> Document.activeDocumentConflict(null))
+				.withMessage("documentType");
 		}
 
 	}
