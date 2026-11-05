@@ -49,3 +49,6 @@ node_modules/
 __pycache__/
 
 /tmp/*
+
+### macOS ###
+.DS_Store
