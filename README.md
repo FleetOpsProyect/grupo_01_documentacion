@@ -2,9 +2,9 @@
 
 Microservicio de FleetOps que controla la vigencia del SOAT, la revisión tecnomecánica y la licencia de conducción, verifica que cada vehículo tenga su tarjeta de propiedad y emite alertas **antes** de que un documento venza. Sigue una **arquitectura hexagonal (puertos y adaptadores)**: el núcleo (`domain` y `application`) no conoce Spring, JPA ni AWS, y se comunica con el exterior solo mediante puertos que implementan los adaptadores de `infrastructure`. Tiene base de datos PostgreSQL propia, no llama por HTTP a otros servicios y publica sus eventos con el patrón Outbox hacia AWS SNS + SQS (DAS, secciones 3, 5 y 8).
 
-> **Estado de esta versión:** implementa **HU-DOC-01 y HU-DOC-02**: `POST /documents` registra el SOAT, la revisión tecnomecánica y la tarjeta de propiedad de un vehículo, o la licencia de conducción de un conductor, con sus fechas de vigencia. Cada registro guarda el documento, su auditoría y sus eventos en el outbox en una sola transacción. **Todavía no usa AWS**: los eventos quedan en `outbox_events` (PENDING) y las réplicas de propietarios se cargan con datos de desarrollo.
+> **Estado de esta versión:** implementa **HU-DOC-01, HU-DOC-02 y HU-DOC-10**. `POST /documents` registra el SOAT, la revisión tecnomecánica y la tarjeta de propiedad de un vehículo, o la licencia de conducción de un conductor, con sus fechas de vigencia; cada registro guarda el documento, su auditoría y sus eventos en el outbox en una sola transacción. Las réplicas de vehículos y conductores se alimentan con los eventos de esos servicios por **AWS SNS + SQS** (HU-DOC-10), según el perfil de Spring: `local` usa un emulador de AWS en Docker (Moto, en [`infra/local-aws`](infra/local-aws)) y `aws` usa AWS real. Sin perfil, el servicio arranca sin AWS, como antes. Los eventos propios todavía quedan en `outbox_events` (PENDING): falta el publicador.
 >
-> Referencias: [`context/G01_DAS_Documentos.md`](context/G01_DAS_Documentos.md) (DAS G01 v0.3) y [`docs/G01_Endpoints_Documentacion.xlsx`](docs/G01_Endpoints_Documentacion.xlsx) (contrato de endpoints y hoja «Eventos SNS» con los payloads).
+> Referencias: [`context/G01_DAS_Documentos.md`](context/G01_DAS_Documentos.md) (DAS G01 v0.7) y [`docs/G01_Endpoints_Documentacion.xlsx`](docs/G01_Endpoints_Documentacion.xlsx) (contrato de endpoints y hoja «Eventos SNS» con los payloads).
 
 ---
 
@@ -146,6 +146,8 @@ Para ejecutar todas las pruebas:
 | Slice web (`@WebMvcTest`) | 201 + Location, snake_case, `X-Correlation-Id`, 400, 409, 422 con `detalles` | Nada |
 | Unitarias de adaptadores | UUIDv7, correlación por MDC, sobre del outbox sin `document_number`, traducción de restricciones únicas a 409 | Nada |
 | Integración (`DocumentRegistrationIT`) | Flujo REST → PostgreSQL 18.6 real con los scripts de `database/`, `ddl-auto: validate`, outbox, auditoría, 409 y 422 | Docker (si no está disponible, la clase se omite) |
+| Unitarias de mensajería | Traducción del sobre (campos desconocidos, -05:00, mensajes inválidos), consumidor SQS con el cliente simulado (borrado solo tras procesar, reintento si SQS cae), validación de `MessagingProperties` | Nada |
+| Integración (`OwnerReplicaSyncIT`) | HU-DOC-10: SNS → SQS (raw delivery y FilterPolicy) → réplica en PostgreSQL → `POST /documents`; repetidos, antiguos, bajas (422) y mensaje inválido a la DLQ tras 3 recepciones, con Moto | Docker |
 
 Todas siguen el patrón AAA (Arrange → Act → Assert).
 
@@ -183,6 +185,7 @@ El workflow [`.github/workflows/ci-sonar.yml`](.github/workflows/ci-sonar.yml) e
 ├── docker-compose.yml           PostgreSQL 18.6 que ejecuta database/*.sql al iniciar + servicio; red propia
 ├── .env.example                 Todas las variables documentadas
 ├── database/                    DDL, semilla de desarrollo y pruebas del esquema
+├── infra/local-aws/             Emulador de AWS SNS + SQS (Moto) y script de provisión; compose independiente
 ├── docs/                        Contrato de endpoints y eventos (Excel)
 └── src/main/java/co/edu/univalle/fleetops/document/service/
     ├── domain/                              NÚCLEO · Dominio (Java puro)
@@ -192,22 +195,26 @@ El workflow [`.github/workflows/ci-sonar.yml`](.github/workflows/ci-sonar.yml) e
     │   ├── event/                           ✔ DocumentRegistered, DocumentExpired (sealed), sin document_number
     │   └── exception/                       ✔ BusinessRuleViolation (422), DomainConflict (409), ResourceNotFound (404)
     ├── application/                         NÚCLEO · Aplicación (sin Spring)
-    │   ├── port/in/                         ✔ RegisterDocumentUseCase, RegisterDocumentCommand, DocumentView
-    │   ├── port/out/                        ✔ Repositorios de documentos, tipos, réplicas, auditoría y outbox;
+    │   ├── port/in/                         ✔ RegisterDocumentUseCase, RegisterDocumentCommand, DocumentView,
+    │   │                                      SyncOwnerReplicaUseCase, OwnerReplicaEvent
+    │   ├── port/out/                        ✔ Repositorios de documentos, tipos, réplicas, eventos procesados,
+    │   │                                      auditoría y outbox;
     │   │                                      BusinessClock, IdGenerator, CorrelationIdProvider
-    │   └── service/                         ✔ RegisterDocumentService
+    │   └── service/                         ✔ RegisterDocumentService, SyncOwnerReplicaService
     └── infrastructure/                      ADAPTADORES
         ├── adapter/in/rest/                 ✔ DocumentController (POST /documents), DTOs, mapper,
         │                                      CorrelationIdFilter, GlobalExceptionHandler (RFC 9457)
-        ├── adapter/in/messaging/            Consumidor SQS de réplicas · vacío: este arquetipo no usa AWS
+        ├── adapter/in/messaging/            ✔ SqsOwnerEventConsumer (una cola por productor),
+        │                                      OwnerEventMessageMapper (Anti-Corruption Layer)
         ├── adapter/in/scheduler/            Job de vigencia 01:00 hora de Bogotá (HU-DOC-06/07) · vacío
         ├── adapter/out/persistence/         ✔ Entidades y repositorios JPA, adaptadores, sobre del outbox
         ├── adapter/out/messaging/           Publicador SNS del outbox · vacío: este arquetipo no usa AWS
         ├── adapter/out/clock/               ✔ ZonedBusinessClock (America/Bogota)
         ├── adapter/out/id/                  ✔ UuidV7Generator (RFC 9562)
         ├── adapter/out/observability/       ✔ MdcCorrelationIdProvider
-        └── config/                          ✔ CoreConfiguration (Composition Root), decorador transaccional,
-                                               DocumentServiceProperties
+        └── config/                          ✔ CoreConfiguration y MessagingConfiguration (Composition Root),
+                                               decoradores transaccionales, DocumentServiceProperties,
+                                               MessagingProperties
 ```
 
 ✔ = implementado en esta versión. Cada paquete tiene un `package-info.java` con su rol, sus patrones y su trazabilidad al DAS.
@@ -240,8 +247,9 @@ POST /documents
 | ADR-DOC-08 | Anulación lógica; la base de datos prohíbe el borrado físico |
 | ADR-DOC-09 | Umbrales configurables por `ALERT_THRESHOLD_DAYS`, validados al arrancar |
 | ADR-DOC-10 | Las reglas por tipo de documento viven en `document_types` (Type Object) |
-| ADR-DOC-12 / 14 | Broker AWS SNS + SQS (tópico `fleetops_document_events`, Message Attribute `event_type`). En esta versión aún no se usa |
+| ADR-DOC-12 / 14 | Broker AWS SNS + SQS (tópico `fleetops_document_events`, Message Attribute `event_type`). Se consume desde HU-DOC-10; el publicador del outbox está pendiente |
 | ADR-DOC-13 | La fecha de negocio se calcula en America/Bogota |
+| ADR-DOC-15 | Desarrollo local con el emulador Moto (no LocalStack) y perfiles de Spring `local` / `aws` |
 
 **Convenciones agregadas por el arquetipo** (no definidas en el DAS):
 - **Problem Details (RFC 9457):** formato de error estándar de la IETF, soportado de forma nativa por Spring.
@@ -255,11 +263,86 @@ POST /documents
 
 Toda la configuración se hace con variables de entorno; vea [`.env.example`](.env.example), donde cada variable tiene su comentario. No hay credenciales en el repositorio.
 
+Los logs salen en JSON (ECS) con `@timestamp` en UTC (decisión P-08); la API, los eventos y las sesiones de la base de datos usan la hora de Bogotá (-05:00).
+
+### Perfiles de Spring
+
+`SPRING_PROFILES_ACTIVE` elige cómo se conecta el servicio a AWS SNS + SQS (HU-DOC-10):
+
+| Perfil | Archivo | Mensajería | Credenciales |
+| :-- | :-- | :-- | :-- |
+| *(vacío)* | `application.yaml` | Apagada: las réplicas solo tienen la semilla de desarrollo | Ninguna |
+| `local` | `application-local.yaml` | Emulador Moto en `MESSAGING_ENDPOINT` | Ficticias (`MESSAGING_ACCESS_KEY_ID` y `MESSAGING_SECRET_ACCESS_KEY`, valor `test`) |
+| `aws` | `application-aws.yaml` | AWS real en `AWS_REGION`, sin endpoint | Cadena por defecto del SDK: el rol de la instancia EC2. Nunca claves en `.env` |
+
+El servicio usa variables propias (`MESSAGING_ENDPOINT`, `MESSAGING_ACCESS_KEY_ID`) y no `AWS_ENDPOINT_URL` ni `AWS_ACCESS_KEY_ID`, que el SDK lee por su cuenta: así una variable del emulador nunca desvía el tráfico de producción, y una clave real de la máquina nunca termina en el emulador.
+
+### Mensajería en local (emulador Moto)
+
+El emulador vive en su propio docker compose, separado del servicio:
+
+```bash
+cd infra/local-aws
+cp .env.example .env
+docker compose up -d        # Moto + provisión de tópicos, colas, DLQ, políticas y suscripciones
+```
+
+Después arranque el servicio con `SPRING_PROFILES_ACTIVE=local` en el `.env` del proyecto (`docker compose up --build` o `./gradlew bootRun`). En el log deben aparecer dos líneas «Consumidor SQS iniciado».
+
+Para publicar un evento como lo haría Conductores o Vehículos (ejemplos en [`infra/local-aws/events`](infra/local-aws/events)):
+
+```bash
+cd infra/local-aws
+docker compose run --rm provisioner /scripts/publish.sh fleetops_driver_events /events/driver_activated_event.json
+```
+
+En Git Bash anteponga `MSYS_NO_PATHCONV=1`, para que no convierta `/scripts/...` en una ruta de Windows. Para ver un mensaje inválido llegar a la DLQ, publique `/events/invalid_event.json`: tras 3 recepciones (hasta unos 90 s con `SQS_VISIBILITY_TIMEOUT_SECONDS=30`) pasa a `fleetops_document_driver_events_dlq`.
+
+Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` vuelve a ejecutar la provisión. Mientras está caído, el servicio sigue respondiendo y reintenta la lectura cada `MESSAGING_RETRY_DELAY` (criterio 7).
+
+> **Por qué Moto y no LocalStack:** desde 2026 la imagen de LocalStack exige `LOCALSTACK_AUTH_TOKEN` (una cuenta de LocalStack) para arrancar. Moto es de código abierto, no pide cuenta y emula lo que usa este servicio (SNS, SQS, FilterPolicy, raw delivery, redrive a DLQ). No valida políticas de IAM ni de colas: eso solo se comprueba en AWS real. Ver ADR-DOC-15 en el DAS.
+
+### Mensajería en AWS real
+
+1. **Región.** Confirme la región seleccionada del proyecto en AWS Settings > View all projects > Overview > Additional Info > Region. Todos los recursos van en esa región; no cree colas ni tópicos en otra.
+2. **Recursos.** Ejecute el mismo script contra AWS, sin endpoint, con una identidad que pueda crear colas y suscripciones (no la del servicio):
+
+   ```bash
+   AWS_REGION=<región del proyecto> SQS_VISIBILITY_TIMEOUT_SECONDS=30 \
+   DRIVER_TOPIC_ARN=<ARN del tópico de Conductores> VEHICLE_TOPIC_ARN=<ARN del tópico de Vehículos> \
+   bash infra/local-aws/scripts/provision.sh
+   ```
+
+   Sin `DRIVER_TOPIC_ARN` y `VEHICLE_TOPIC_ARN`, el script crea esos tópicos por nombre en su cuenta. Si los tópicos de los productores están en otra cuenta, ese equipo debe permitir la suscripción en la política de su tópico. Las colas quedan con long polling de 20 s, cifrado SSE-SQS, redrive a la DLQ con 3 recepciones y una política que solo deja escribir al tópico del productor (`aws:SourceArn`).
+3. **Permisos del servicio.** Asigne al rol de la instancia EC2 una política mínima, solo sobre las dos colas:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Sid": "ConsumeOwnerEvents",
+       "Effect": "Allow",
+       "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueUrl", "sqs:GetQueueAttributes"],
+       "Resource": [
+         "arn:aws:sqs:<región>:<cuenta>:fleetops_document_driver_events_queue",
+         "arn:aws:sqs:<región>:<cuenta>:fleetops_document_vehicle_events_queue"
+       ]
+     }]
+   }
+   ```
+
+4. **Variables del servidor.** En `/opt/fleetops/documents/.env` agregue `SPRING_PROFILES_ACTIVE=aws`, `AWS_REGION`, `MESSAGING_WAIT_TIME_SECONDS=20`, `MESSAGING_MAX_MESSAGES=10` y `MESSAGING_RETRY_DELAY=5s`. No defina `MESSAGING_ENDPOINT` ni claves. Mientras no las agregue, el despliegue sigue sin mensajería.
+5. **Metadatos de la instancia.** El servicio corre en un contenedor con red bridge: para que el SDK obtenga las credenciales del rol por IMDSv2, el límite de saltos de la instancia debe ser 2 (`aws ec2 modify-instance-metadata-options --instance-id <id> --http-put-response-hop-limit 2 --http-tokens required`).
+6. **Recomendado.** Una alarma de CloudWatch cuando `ApproximateNumberOfMessagesVisible` de cada DLQ sea mayor que 0, para enterarse de los mensajes que fallan. Si la política del equipo lo pide, cambie SSE-SQS por una llave KMS administrada por el cliente (y permita a SNS usarla).
+
 ## 8. Limitaciones conocidas y próximos pasos
 
 **Limitaciones de esta versión**
 - Solo HU-DOC-01 y HU-DOC-02. `Location` apunta a `GET /documents/{id}`, pero ese endpoint (HU-DOC-03) todavía no existe y responde 404.
-- Sin AWS: los eventos quedan en `outbox_events` como PENDING y no se publican. Las réplicas no se alimentan por eventos, sino con `database/document_seed_dev.sql`.
+- Los eventos propios quedan en `outbox_events` como PENDING: el publicador SNS del outbox todavía no existe.
+- Los eventos de Vehículos (`fleetops_vehicle_events`, `vehicle_created_event`, `vehicle_decommissioned_event`) y `driver_deactivated_event` son SUPUESTOS hasta que esos equipos los confirmen (P-04, P-05).
+- Una baja que llega antes que el alta de la misma entidad se registra como procesada sin efecto (no hay fila que desactivar); si después llega el alta, la entidad queda activa. Se resuelve cuando los productores garanticen el orden o publiquen el estado completo.
+- `docker-compose.yml` monta `database/document_seed_dev.sql` también en el servidor (`deploy.yml` usa el mismo compose). Con las réplicas ya alimentadas por eventos, conviene sacar la semilla del compose de producción.
 - Sin migraciones: los scripts de `database/` solo corren cuando el volumen de PostgreSQL está vacío. Un cambio de esquema exige recrear la base.
 - La regla «la nueva fecha de renovación debe ser futura» y las demás de HU-DOC-04/05 no aplican todavía.
 - La autenticación y los roles no están definidos (DAS sec. 12, punto 15).
@@ -274,7 +357,7 @@ Toda la configuración se hace con variables de entorno; vea [`.env.example`](.e
 
 **Próximos pasos sugeridos** (orden del DAS sec. 13)
 1. HU-DOC-03: `GET /documents/{id}` y `GET /documents` (con el rango de vencimiento).
-2. HU-DOC-10: consumidor SQS de réplicas (AWS SDK v2) y publicador SNS del outbox, con LocalStack en desarrollo.
+2. Publicador SNS del outbox (`adapter/out/messaging`), con el mismo emulador y los mismos perfiles.
 3. HU-DOC-06/07 (job de vigencia), HU-DOC-05 (renovación), HU-DOC-04 (corrección y anulación), HU-DOC-08/09 y `validity-check`.
 4. Migraciones versionadas del esquema cuando se estabilice.
 5. Pipeline CI/CD y OpenAPI en `fleetops-contracts` (HU-DOC-11).

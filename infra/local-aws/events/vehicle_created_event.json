@@ -1,0 +1,11 @@
+{
+  "event_id": "019a5f00-0000-7000-8000-00000000a001",
+  "event_type": "vehicle_created_event",
+  "occurred_at": "2026-11-08T09:00:00-05:00",
+  "source": "vehicle",
+  "correlation_id": "019a5f00-0000-7000-8000-0000000c0001",
+  "data": {
+    "vehicle_id": "01960000-0000-7000-8000-000000000011",
+    "license_plate": "JKL012"
+  }
+}

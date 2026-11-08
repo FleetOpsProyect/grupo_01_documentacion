@@ -5,6 +5,10 @@ spring:
     name: fleetops-document-service
   config:
     import: optional:file:.env[.properties]
+  profiles:
+    # Perfil de ejecución (SPRING_PROFILES_ACTIVE): local (emulador de AWS) o aws (AWS real). Vacío: sin
+    # mensajería, como en las versiones anteriores. Se lee también desde .env al ejecutar con bootRun
+    active: ${SPRING_PROFILES_ACTIVE:}
   datasource:
     url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
     username: ${DB_USER}
@@ -52,7 +56,8 @@ management:
 
 logging:
   structured:
-    # Logs JSON por salida estándar, con correlation_id desde el MDC (DAS sec. 10)
+    # Logs JSON por salida estándar, con correlation_id desde el MDC (DAS sec. 10). El @timestamp de los logs
+    # queda en UTC (decisión P-08 del 08-11-2026), a diferencia de la API y los eventos (-05:00)
     format:
       console: ecs
   level:
@@ -64,3 +69,18 @@ fleetops:
     business-time-zone: ${BUSINESS_TIME_ZONE}
     # Umbrales de alerta en días, validados al arrancar (ADR-DOC-09)
     alert-threshold-days: ${ALERT_THRESHOLD_DAYS}
+  # Mensajería AWS SNS + SQS (HU-DOC-10, ADR-DOC-12, ADR-DOC-14). Apagada sin perfil: el servicio arranca sin AWS.
+  # La activan los perfiles local (emulador Moto, infra/local-aws) y aws (AWS real); ver application-*.yaml
+  messaging:
+    enabled: false
+    consumer:
+      # Long polling de ReceiveMessage, de 0 a 20 s (recomendado 20: menos llamadas vacías y menor costo)
+      wait-time-seconds: ${MESSAGING_WAIT_TIME_SECONDS}
+      # Mensajes por lectura, de 1 a 10
+      max-messages: ${MESSAGING_MAX_MESSAGES}
+      # Espera antes de reintentar si SQS no responde (HU-DOC-10, criterio 7), por ejemplo 5s
+      retry-delay: ${MESSAGING_RETRY_DELAY}
+    # Colas propias de Documentación (DAS sec. 8.2); las provisiona infra/local-aws/provision.sh
+    queues:
+      driver-events: fleetops_document_driver_events_queue
+      vehicle-events: fleetops_document_vehicle_events_queue

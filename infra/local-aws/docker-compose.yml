@@ -1,0 +1,46 @@
+# Emulador local de AWS SNS + SQS para HU-DOC-10, independiente del docker compose del servicio.
+#
+# Usa Moto (motoserver/moto) en lugar de LocalStack: desde 2026 la imagen de LocalStack exige LOCALSTACK_AUTH_TOKEN
+# (cuenta de LocalStack) para arrancar; Moto es de código abierto y no pide cuenta. Ver DAS, ADR-DOC-15.
+#
+# Uso (desde esta carpeta, con .env copiado de .env.example):
+#   docker compose up -d          # arranca Moto y provisiona tópicos, colas, DLQ y suscripciones
+#   docker compose run --rm provisioner /scripts/publish.sh fleetops_driver_events /events/driver_activated_event.json
+#   docker compose down           # Moto guarda todo en memoria: al bajarlo se pierde y el próximo «up» lo recrea
+#
+# El servicio se conecta con SPRING_PROFILES_ACTIVE=local (ver application-local.yaml y el .env del proyecto).
+
+name: fleetops-local-aws
+
+services:
+  moto:
+    image: motoserver/moto:5.2.5
+    # Solo en esta máquina: el emulador no tiene autenticación real
+    ports:
+      - "127.0.0.1:${LOCAL_AWS_HOST_PORT:?Defina LOCAL_AWS_HOST_PORT en infra/local-aws/.env}:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/moto-api/')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Contenedor de un solo uso: crea los recursos y termina. Es el mismo script que se usaría contra AWS real
+  provisioner:
+    image: amazon/aws-cli:2.39.6
+    depends_on:
+      moto:
+        condition: service_healthy
+    entrypoint: ["bash"]
+    command: ["/scripts/provision.sh"]
+    environment:
+      AWS_ENDPOINT_URL: http://moto:5000
+      AWS_REGION: ${AWS_REGION:?Defina AWS_REGION en infra/local-aws/.env}
+      # Credenciales ficticias: Moto acepta cualquier valor
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?Defina AWS_ACCESS_KEY_ID en infra/local-aws/.env}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?Defina AWS_SECRET_ACCESS_KEY en infra/local-aws/.env}
+      SQS_VISIBILITY_TIMEOUT_SECONDS: ${SQS_VISIBILITY_TIMEOUT_SECONDS:?Defina SQS_VISIBILITY_TIMEOUT_SECONDS en infra/local-aws/.env}
+      AWS_PAGER: ""
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./events:/events:ro
