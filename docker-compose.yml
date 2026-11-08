@@ -13,6 +13,10 @@ name: fleetops-documents
 services:
   documents-db:
     image: postgres:18.6-alpine3.24
+    # Zona horaria de las sesiones (DAS sec. 7, P-02): un cliente de base de datos ve las marcas de tiempo en
+    # Bogotá (-05:00). No cambia lo guardado: timestamptz guarda instantes absolutos. Aplica en cada arranque,
+    # también con un volumen ya creado
+    command: ["postgres", "-c", "timezone=${BUSINESS_TIME_ZONE}"]
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}

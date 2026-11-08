@@ -200,7 +200,7 @@ El workflow [`.github/workflows/ci-sonar.yml`](.github/workflows/ci-sonar.yml) e
         ├── adapter/in/rest/                 ✔ DocumentController (POST /documents), DTOs, mapper,
         │                                      CorrelationIdFilter, GlobalExceptionHandler (RFC 9457)
         ├── adapter/in/messaging/            Consumidor SQS de réplicas · vacío: este arquetipo no usa AWS
-        ├── adapter/in/scheduler/            Job de vigencia 06:00 UTC (HU-DOC-06/07) · vacío
+        ├── adapter/in/scheduler/            Job de vigencia 01:00 hora de Bogotá (HU-DOC-06/07) · vacío
         ├── adapter/out/persistence/         ✔ Entidades y repositorios JPA, adaptadores, sobre del outbox
         ├── adapter/out/messaging/           Publicador SNS del outbox · vacío: este arquetipo no usa AWS
         ├── adapter/out/clock/               ✔ ZonedBusinessClock (America/Bogota)
@@ -240,7 +240,7 @@ POST /documents
 | ADR-DOC-08 | Anulación lógica; la base de datos prohíbe el borrado físico |
 | ADR-DOC-09 | Umbrales configurables por `ALERT_THRESHOLD_DAYS`, validados al arrancar |
 | ADR-DOC-10 | Las reglas por tipo de documento viven en `document_types` (Type Object) |
-| ADR-DOC-12 / 14 | Broker AWS SNS + SQS (tópico `fleetops_documents_events`, Message Attribute `event_type`). En esta versión aún no se usa |
+| ADR-DOC-12 / 14 | Broker AWS SNS + SQS (tópico `fleetops_document_events`, Message Attribute `event_type`). En esta versión aún no se usa |
 | ADR-DOC-13 | La fecha de negocio se calcula en America/Bogota |
 
 **Convenciones agregadas por el arquetipo** (no definidas en el DAS):

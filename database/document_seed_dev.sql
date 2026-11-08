@@ -3,8 +3,8 @@
 -- Datos semilla de DESARROLLO para las réplicas de propietarios (schema "document")
 --
 -- Fuente: DAS G01, ADR-DOC-12 y ADR-DOC-14: mientras no exista el consumidor SQS de
--- fleetops_vehicles_events y fleetops_drivers_events (SUPUESTO: nombres por confirmar con esos
--- equipos), las réplicas se cargan con datos semilla en desarrollo.
+-- fleetops_driver_events (confirmado) y fleetops_vehicle_events (SUPUESTO: por confirmar con Vehículos),
+-- es decir, hasta implementar HU-DOC-10, las réplicas se cargan con datos semilla en desarrollo.
 --
 -- NUNCA ejecutar en producción: estos propietarios no existen en Vehículos ni en Conductores.
 -- Requiere haber ejecutado antes database/document_schema.sql. Es idempotente.

@@ -80,7 +80,9 @@ class DocumentControllerTest {
 			.andExpect(jsonPath("$.previous_document_id").value(nullValue()))
 			.andExpect(jsonPath("$.cancellation_reason").value(nullValue()))
 			.andExpect(jsonPath("$.cancelled_at").value(nullValue()))
-			.andExpect(jsonPath("$.created_at").value("2026-10-26T15:04:05Z"));
+			// Marcas de tiempo con el desfase de Bogotá (DAS sec. 7, decisión P-02 del 08-11-2026)
+			.andExpect(jsonPath("$.created_at").value("2026-10-26T10:04:05-05:00"))
+			.andExpect(jsonPath("$.updated_at").value("2026-10-26T10:04:05-05:00"));
 	}
 
 	@Test

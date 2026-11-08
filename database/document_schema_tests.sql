@@ -272,7 +272,7 @@ SELECT pg_temp.expect_violation($q$
 $q$, 'ck_document_types_owner_type');
 
 INSERT INTO document.outbox_events (event_id, event_type, topic, message_key, aggregate_id, payload)
-VALUES ('00000000-0000-7000-8000-000000000e01', 'document_renewed_event', 'fleetops_documents_events',
+VALUES ('00000000-0000-7000-8000-000000000e01', 'document_renewed_event', 'fleetops_document_events',
         '00000000-0000-7000-8000-000000000f01', '00000000-0000-7000-8000-000000000a05', '{"event_type": "document_renewed_event"}');
 DO $$ BEGIN RAISE NOTICE 'OK  acepta: evento PENDING en el outbox'; END $$;
 

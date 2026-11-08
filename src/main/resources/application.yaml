@@ -24,11 +24,13 @@ spring:
         # Todas las tablas viven en el schema document (DAS sec. 6.4)
         default_schema: document
         jdbc:
+          # Solo afecta la conversión JDBC: timestamptz guarda instantes absolutos, sin zona
           time_zone: UTC
   jackson:
-    # Datos en snake_case (DAS sec. 6) y marcas de tiempo ISO 8601 en UTC (DAS sec. 7)
+    # Datos en snake_case (DAS sec. 6). Las marcas de tiempo salen en ISO 8601 con el desfase de la zona de negocio
+    # (America/Bogota, -05:00; DAS sec. 7): los Instant los formatea BusinessTimeZoneJacksonModule
     property-naming-strategy: SNAKE_CASE
-    time-zone: UTC
+    time-zone: ${fleetops.documents.business-time-zone}
   mvc:
     problemdetails:
       enabled: true
