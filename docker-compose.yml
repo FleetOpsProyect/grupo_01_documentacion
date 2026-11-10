@@ -1,8 +1,11 @@
 # Arranque aislado del servicio de Documentación y Seguros (HU-DOC-11, DAS sec. 10).
 # Todas las variables vienen de .env (copia de .env.example).
-# Mensajería: AWS SNS + SQS (ADR-DOC-12, ADR-DOC-14; decidido 26-10-2026). Este arquetipo todavía no
-# usa AWS: los eventos solo se escriben en el outbox (outbox_events, estado PENDING) y las réplicas de
-# vehículos y conductores se cargan con la semilla de desarrollo.
+# Mensajería: AWS SNS + SQS (ADR-DOC-12, ADR-DOC-14). Los eventos propios solo se escriben en el outbox
+# (outbox_events, estado PENDING). Las réplicas de vehículos y conductores las alimenta el consumidor SQS
+# (HU-DOC-10) según SPRING_PROFILES_ACTIVE:
+#   - vacío: sin mensajería (réplicas solo con la semilla de desarrollo);
+#   - local: emulador Moto de infra/local-aws (otro docker compose, independiente de este);
+#   - aws:   AWS real, con el rol de la instancia EC2.
 #
 # Esquema: sin migraciones en esta versión. PostgreSQL ejecuta los scripts de database/ en orden
 # alfabético la PRIMERA vez que arranca con el volumen vacío. Para recrear la base desde cero:
@@ -13,6 +16,10 @@ name: fleetops-documents
 services:
   documents-db:
     image: postgres:18.6-alpine3.24
+    # Zona horaria de las sesiones (DAS sec. 7, P-02): un cliente de base de datos ve las marcas de tiempo en
+    # Bogotá (-05:00). No cambia lo guardado: timestamptz guarda instantes absolutos. Aplica en cada arranque,
+    # también con un volumen ya creado
+    command: ["postgres", "-c", "timezone=${BUSINESS_TIME_ZONE}"]
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
@@ -62,6 +69,20 @@ services:
       ALERT_THRESHOLD_DAYS: ${ALERT_THRESHOLD_DAYS}
       LOG_LEVEL: ${LOG_LEVEL}
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS}
+      # Mensajería (HU-DOC-10). Con valor por defecto vacío: un .env sin estas variables deja la mensajería
+      # apagada y el servicio arranca igual que antes
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
+      AWS_REGION: ${AWS_REGION:-}
+      # Dentro del contenedor, «localhost» es el propio contenedor: el emulador se alcanza por el host
+      MESSAGING_ENDPOINT: ${MESSAGING_CONTAINER_ENDPOINT:-}
+      MESSAGING_ACCESS_KEY_ID: ${MESSAGING_ACCESS_KEY_ID:-}
+      MESSAGING_SECRET_ACCESS_KEY: ${MESSAGING_SECRET_ACCESS_KEY:-}
+      MESSAGING_WAIT_TIME_SECONDS: ${MESSAGING_WAIT_TIME_SECONDS:-}
+      MESSAGING_MAX_MESSAGES: ${MESSAGING_MAX_MESSAGES:-}
+      MESSAGING_RETRY_DELAY: ${MESSAGING_RETRY_DELAY:-}
+    # host.docker.internal apunta a la máquina anfitriona también en Linux (en Docker Desktop ya existe)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${SERVICE_HOST_PORT}:${SERVER_PORT}"
     healthcheck:

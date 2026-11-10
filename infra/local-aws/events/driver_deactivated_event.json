@@ -1,0 +1,10 @@
+{
+  "event_id": "019a5f00-0000-7000-8000-00000000d002",
+  "event_type": "driver_deactivated_event",
+  "occurred_at": "2026-11-08T10:00:00-05:00",
+  "source": "driver",
+  "correlation_id": "019a5f00-0000-7000-8000-0000000c0001",
+  "data": {
+    "driver_id": "01960000-0000-7000-8000-000000000201"
+  }
+}

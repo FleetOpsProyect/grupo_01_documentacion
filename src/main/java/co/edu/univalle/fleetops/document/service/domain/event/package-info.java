@@ -9,7 +9,7 @@
  * {@code DocumentRegistered} se emite siempre que el registro tiene éxito, no solo cuando nace vencido.
  *
  * <p><b>Restricciones:</b> los eventos no incluyen {@code document_number} (DAS sec. 4.2). El tópico
- * ({@code fleetops_documents_events}) todavía no está provisionado: mientras tanto, los eventos se
+ * ({@code fleetops_document_events}) todavía no está provisionado: mientras tanto, los eventos se
  * guardan en el outbox pero no se publican.
  */
 package co.edu.univalle.fleetops.document.service.domain.event;

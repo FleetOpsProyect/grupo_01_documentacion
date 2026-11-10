@@ -1,0 +1,9 @@
+# Perfil aws: AWS real (EC2). Actívelo con SPRING_PROFILES_ACTIVE=aws en el .env del servidor.
+# Sin endpoint ni claves: el SDK usa la cadena de credenciales por defecto, es decir, el rol de la instancia EC2
+# (perfil de instancia), con permisos sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueUrl y
+# sqs:GetQueueAttributes solo sobre las dos colas propias (README, «Mensajería en AWS»).
+fleetops:
+  messaging:
+    enabled: true
+    # Región seleccionada del proyecto (AWS Settings > View all projects > Overview > Additional Info > Region)
+    region: ${AWS_REGION}

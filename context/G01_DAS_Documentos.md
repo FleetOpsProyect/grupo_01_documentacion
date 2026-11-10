@@ -1,6 +1,6 @@
 # **DAS – Servicio de Documentación y Seguros (FleetOps)**
 
-*Equipo Documentación y Seguros · Versión 0.4 · Octubre 2026*
+*Equipo Documentación y Seguros · Versión 0.7 · Noviembre 2026*
 
 **Registro de cambios**
 
@@ -10,6 +10,9 @@
 | 0.2 | 26-10-2026 | (1) El modelo de datos de las secciones 6 y 7 prevalece sobre el MER; el MER se alinea con los cuatro tipos, sin campos de póliza. (2) La licencia guarda una sola categoría (license\_category); se corrige ADR-DOC-07. (3) La fecha de negocio se calcula en America/Bogota (nuevo ADR-DOC-13; cierra el punto abierto 4). (4) Otros cambios incorporados en esta versión: broker por definir entre Kafka y AWS SNS + SQS (ADR-DOC-12, punto abierto 16); regla única de cálculo del estado (6.2); réplicas con is\_active y consumo de bajas (punto 12); PostgreSQL 18 con el schema document y detalle físico del modelo (14.1 a 14.4) |
 | 0.3 | 26-10-2026 | Decisión del equipo FleetOps: el broker es **AWS SNS + SQS** (ADR-DOC-12, resuelto; cierra el punto abierto 16). Se agrega ADR-DOC-14 con la nomenclatura (tópicos, colas y tipos de evento en snake\_case e inglés, Message Attribute `event_type`) y se reescribe la sección 8. `document_registered_event` pasa a publicarse siempre que un documento se registra con éxito (antes ninguna HU lo contemplaba). Se confirma que una corrección (PATCH) puede dejar un documento EXPIRED (publica `document_expired_event`) o reactivarlo (publica `document_renewed_event` con `origin: CORRECTION`; cierra el punto abierto 11). Se confirma que anular un documento no publica ningún evento y el bloqueo permanece (riesgo abierto, sección 11) |
 | 0.4 | 28-10-2026 | La regla «tipo \+ document\_number únicos» (6.3) pasa a aplicarse solo entre los documentos no anulados: un documento CANCELLED (registrado por error) libera su número para registrarlo de nuevo, por ejemplo con el propietario correcto, ya que owner\_id no se puede corregir con PATCH. REPLACED sigue reservando el número. uk\_documents\_type\_number pasa de restricción UNIQUE a índice único parcial (14.2 y 14.3) |
+| 0.5 | 08-11-2026 | Se refinan las historias HU-DOC-01 a HU-DOC-11 con las decisiones de este DAS y se propone HU-DOC-12 (validity-check), en `docs/G01_Historias_Usuario.xlsx` (4.1). De las historias se adoptan el formato de document\_number y la longitud de issuing\_entity, y la regla de que issue\_date no puede ser futura (6.3). Conductores confirmó su evento: tópico fleetops\_driver\_events, event\_type driver\_activated\_event, data {driver\_id, full\_name} (3 y 8.2). Por analogía, el supuesto del tópico de Vehículos pasa a fleetops\_vehicle\_events. Nuevo punto abierto 17 sobre la nomenclatura de eventos entre equipos |
+| 0.6 | 08-11-2026 | Respuestas del equipo a los pendientes de las historias: (P-01) el slug de los tópicos es el nombre del microservicio en singular, así que este servicio publica en fleetops\_document\_events y sus colas pasan a fleetops\_document\_{origen}\_events\_queue; (P-02) todas las marcas de tiempo salen con el desfase de Colombia (-05:00); (P-03) source es el slug del microservicio que publica (`document`); (P-06) se aprueba HU-DOC-12 y su endpoint entra en la sección 7; (P-07) ALERT\_THRESHOLD\_DAYS admite cualquier orden y se ordena. Cierra el punto abierto 17 (ADR-DOC-09, 13 y 14) |
+| 0.7 | 08-11-2026 | (P-08) Los logs se quedan en UTC: su @timestamp no lleva el desfase -05:00 de la API y los eventos (10). Se implementa HU-DOC-10: consumidor SQS de réplicas con el AWS SNS + SQS real o emulado; se detallan las reglas del consumidor que quedaron fijadas en el código (8.2). Nuevo ADR-DOC-15: desarrollo local con el emulador Moto en lugar de LocalStack, que desde 2026 exige una cuenta, y perfiles de Spring `local` y `aws`. Se actualiza el punto abierto 16 |
 
 ## **1\. Introducción y alcance**
 
@@ -54,12 +57,12 @@ Documentación es productor de un solo tópico SNS y consumidor de dos. No llama
 
 | Dirección | Servicio | Qué intercambian |
 | :---- | :---- | :---- |
-| Consume | Vehículos (tópico SNS fleetops\_vehicles\_events, SUPUESTO: nombre por confirmar con ese equipo) | vehicle\_created\_event y vehicle\_decommissioned\_event: qué vehículos son propietarios válidos |
-| Consume | Conductores (tópico SNS fleetops\_drivers\_events, SUPUESTO: nombre por confirmar con ese equipo) | driver\_created\_event y driver\_deactivated\_event: qué conductores son propietarios válidos |
+| Consume | Vehículos (tópico SNS fleetops\_vehicle\_events, SUPUESTO por analogía con el de Conductores; por confirmar con ese equipo) | vehicle\_created\_event y vehicle\_decommissioned\_event (SUPUESTOS): qué vehículos son propietarios válidos |
+| Consume | Conductores (tópico SNS fleetops\_driver\_events, confirmado por Conductores el 08-11-2026) | driver\_activated\_event (confirmado) y driver\_deactivated\_event (SUPUESTO): qué conductores son propietarios válidos |
 | Publica | Vehículos | document\_expired\_event y document\_renewed\_event de un vehículo: agrega o quita el bloqueo DOCUMENTO |
 | Publica | Conductores | document\_expired\_event y document\_renewed\_event de un conductor: agrega o quita el bloqueo DOCUMENTO |
 | Publica | Notificaciones | document\_expiring\_soon\_event y document\_expired\_event: dispara los avisos |
-| Publica | Reportes | Todos los eventos del tópico fleetops\_documents\_events |
+| Publica | Reportes | Todos los eventos del tópico fleetops\_document\_events |
 
 ## **4\. Requisitos arquitectónicamente significativos**
 
@@ -78,8 +81,11 @@ Documentación es productor de un solo tópico SNS y consumidor de dos. No llama
 | HU-DOC-09 | Consultar si un vehículo o conductor cumple con toda su documentación obligatoria | Consulta de cumplimiento sin efectos secundarios: tres documentos obligatorios por vehículo (SOAT, tecnomecánica y tarjeta de propiedad) y la licencia por conductor |
 | HU-DOC-10 | Mantener copias locales de vehículos y conductores, alimentadas por eventos | Consumidor de eventos idempotente que mantiene réplicas mínimas, para validar propietarios sin llamar por HTTP a otros servicios |
 | HU-DOC-11 | Poder operar y diagnosticar el servicio sin depender de otros equipos | Salud, logs JSON, contenedor, pipeline CI/CD y documentación OpenAPI |
+| HU-DOC-12 | Consultar qué vehículos o conductores tienen toda su documentación obligatoria vigente hasta una fecha dada (aprobada el 08-11-2026) | Consulta paginada de solo lectura sobre las réplicas y los documentos activos, con la misma regla de obligatorios de HU-DOC-09 aplicada a una fecha futura |
 
 ### Las exigencias de HU-DOC-01, 02, 03, 05, 06, 08 y 09 incorporan las decisiones sobre tipos de documento.
+
+Los criterios de aceptación completos de cada historia, refinados el 08-11-2026 con las decisiones de este DAS (nombres en inglés y snake\_case, AWS SNS + SQS, `event_type`, payloads y reglas de negocio), están en `docs/G01_Historias_Usuario.xlsx`. Ese libro también incluye la propuesta **HU-DOC-12** para el endpoint `GET /documents/validity-check`, que no tenía historia; las brechas entre lo implementado y las historias; y los pendientes que debe decidir el equipo. Los mensajes de error de esas historias son el contrato: el código y `docs/G01_Endpoints_Documentacion.xlsx` los siguen.
 
 ### **4.2 Atributos de calidad principales**
 
@@ -89,7 +95,7 @@ Documentación es productor de un solo tópico SNS y consumidor de dos. No llama
 | Seguridad | Integridad | Los datos legales no se alteran ni se pierden, ni siquiera con operaciones simultáneas | Renovación atómica, todo o nada, y solo una de dos renovaciones simultáneas tiene éxito (HU-DOC-05); tipo y propietario inmodificables; anulación sin borrado físico (HU-DOC-04) |
 | Fiabilidad | Tolerancia a fallos | Ningún evento se pierde ni se duplica, el job se recupera de una caída y un documento con error no detiene a los demás | Outbox para publicar tras confirmar la transacción (HU-DOC-05); verificación pendiente al arrancar (HU-DOC-06 y 07); hasta 3 reintentos y luego cola de errores en el consumidor (HU-DOC-10) |
 | Fiabilidad | Disponibilidad | El servicio sigue atendiendo si falla el broker y responde de forma controlada si cae la base de datos | /health en menos de 500 ms con la base de datos arriba; 503 en menos de 2 s si cae (HU-DOC-11); endpoints operativos sin broker, con reintento periódico de conexión (HU-DOC-10) |
-| Performance | Comportamiento temporal | Las alertas salen con anticipación y el job termina en tiempo acotado | Alertas por defecto a 30, 15, 7 y 1 días, verificación diaria a las 06:00 UTC y menos de 5 minutos con 10.000 documentos (HU-DOC-06) |
+| Performance | Comportamiento temporal | Las alertas salen con anticipación y el job termina en tiempo acotado | Alertas por defecto a 30, 15, 7 y 1 días, verificación diaria a la 01:00 hora de Bogotá (06:00 UTC) y menos de 5 minutos con 10.000 documentos (HU-DOC-06) |
 | Compatibilidad | Interoperabilidad | Se integra con Vehículos, Conductores, Notificaciones y Reportes solo mediante contratos explícitos | Eventos con el sobre estándar sobre AWS SNS + SQS, filtrables por el Message Attribute event\_type, y esquemas en fleetops-contracts; API documentada en OpenAPI (HU-DOC-11); X-Correlation-Id en toda respuesta |
 | Usabilidad | Protección contra errores de usuario | La API impide registros erróneos y repeticiones accidentales | 422 con mensaje y detalle por campo; 400 ante JSON mal formado; 409 ante duplicados; un doble clic o reintento no crea duplicados (HU-DOC-05); anulación con motivo de un registro erróneo (HU-DOC-04) |
 | Seguridad | Confidencialidad | Los datos personales de las licencias no se exponen en logs ni en eventos | document\_number enmascarado en los logs, dejando los últimos 4 caracteres; los eventos no incluyen document\_number; la auditoría interna (document\_audit\_log) lo guarda completo; sin contraseñas ni tokens en logs (HU-DOC-11) |
@@ -103,7 +109,7 @@ No se incluyen autenticidad ni no repudio, que dependen de definir la autenticac
 
 * Es un microservicio independiente con **base de datos propia**; ningún otro servicio accede a ella.  
 * Decisión de negocio: cada vehículo tiene **tres documentos** (SOAT, tecnomecánica y tarjeta de propiedad) y cada conductor **una única licencia**; la tarjeta de propiedad no tiene vencimiento.  
-* Comunicación asíncrona mediante **AWS SNS + SQS** (ADR-DOC-12, decidido por el equipo FleetOps el 26-10-2026). Publica en el tópico SNS **fleetops\_documents\_events** y consume, mediante colas SQS propias, los tópicos SNS de Vehículos y Conductores (sección 8). Los nombres de tópicos, colas y tipos de evento usan snake\_case en inglés (ADR-DOC-14).  
+* Comunicación asíncrona mediante **AWS SNS + SQS** (ADR-DOC-12, decidido por el equipo FleetOps el 26-10-2026). Publica en el tópico SNS **fleetops\_document\_events** y consume, mediante colas SQS propias, los tópicos SNS de Vehículos y Conductores (sección 8). Los nombres de tópicos, colas y tipos de evento usan snake\_case en inglés (ADR-DOC-14).  
 * Los eventos usan el sobre estándar del catálogo y se publican con el patrón Outbox.  
 * API REST con JSON, documentada en OpenAPI dentro del repositorio fleetops-contracts, junto con los esquemas de los eventos.  
 * La base de datos debe ofrecer transacciones y restricciones únicas, porque varias reglas del backlog dependen de ellas (renovación, alertas sin duplicados, un documento activo por tipo).  
@@ -146,6 +152,8 @@ El día del vencimiento el documento está EXPIRING\_SOON con days\_remaining 0 
 
 * La combinación tipo \+ document\_number es única entre los documentos no anulados. Un documento CANCELLED libera su número: se registró por error y puede registrarse de nuevo, por ejemplo con el propietario correcto. REPLACED lo sigue reservando, porque una renovación trae un número nuevo (v0.4).  
 * Un propietario tiene como máximo un documento activo por tipo: un vehículo, un SOAT, una tecnomecánica y una tarjeta de propiedad; un conductor, una licencia. Para cambiar de documento se usa la renovación.  
+* document\_number cumple ^[A-Za-z0-9-]{5,30}$ e issuing\_entity tiene entre 3 y 100 caracteres (HU-DOC-01, v0.5).  
+* issue\_date no puede ser posterior a la fecha actual (HU-DOC-01, v0.5).  
 * expiration\_date es obligatoria para SOAT, tecnomecánica y licencia, y debe ser posterior a issue\_date; en la tarjeta de propiedad va vacía.  
 * license\_category es obligatoria en DRIVER\_LICENSE (una sola categoría por licencia) y va vacía en los documentos de vehículo.  
 * El propietario debe existir en la réplica local y estar activo (is\_active = true); si no, se responde 422.  
@@ -181,18 +189,19 @@ Todas las tablas viven en el schema **document** de PostgreSQL. El detalle de co
 | POST /documents/{id}/cancellation | Anula con motivo | 04 | 200; 404; 409; 422 |
 | POST /documents/{id}/renewals | Renueva conservando el anterior (no aplica a la tarjeta de propiedad) | 05 | 201 con Location; 400; 404; 409; 422 |
 | GET /documents/expiring-soon?days={num} | Documentos próximos a vencer en un horizonte de días | 08 | 200; 400 |
-| GET //documents/compliance?owner\_type=…\&owner\_id={uuid} | Cumplimiento documental de un vehículo o conductor | 09 | 200; 400; 404 |
+| GET /documents/compliance?owner\_type=…\&owner\_id={uuid} | Cumplimiento documental de un vehículo o conductor | 09 | 200; 400; 404 |
+| GET /documents/validity-check?owner\_type=…\&valid\_until={fecha} | Vehículos o conductores con toda su documentación obligatoria vigente hasta una fecha | 12 | 200; 400; 422 |
 | GET /health | Estado del servicio | 11 | 200 (UP); 503 (DOWN) |
 
-**Convenciones del backlog.** 400 para solicitudes mal formadas o parámetros inválidos, 404 para recursos inexistentes, 409 para conflictos de unicidad o de estado y 422 para validaciones de negocio. Los mensajes van en español y el detalle por campo en detalles. Las fechas usan YYYY-MM-DD, las marcas de tiempo ISO 8601 en UTC, y la paginación usa page (desde 0\) y size (20 por defecto, máximo 100). Toda respuesta incluye X-Correlation-Id.
+**Convenciones del backlog.** 400 para solicitudes mal formadas o parámetros inválidos, 404 para recursos inexistentes, 409 para conflictos de unicidad o de estado y 422 para validaciones de negocio. Los mensajes van en español y el detalle por campo en detalles. Las fechas usan YYYY-MM-DD, las marcas de tiempo ISO 8601 con el desfase de Colombia, por ejemplo 2026-10-26T10:04:05-05:00 (decisión del equipo del 08-11-2026; la zona es BUSINESS\_TIME\_ZONE = America/Bogota), y la paginación usa page (desde 0\) y size (20 por defecto, máximo 100). Toda respuesta incluye X-Correlation-Id.
 
 ## **8\. Interfaz asíncrona (AWS SNS + SQS)**
 
-> **Broker decidido (ADR-DOC-12, v0.3): AWS SNS + SQS.** Cada microservicio de FleetOps publica en su propio tópico SNS, con el nombre **fleetops\_{slug}\_events** en snake\_case e inglés (ADR-DOC-14); el de este servicio es **fleetops\_documents\_events**. Cada evento lleva un Message Attribute **event\_type** (String) con el tipo de evento en snake\_case terminado en `_event` (por ejemplo `document_registered_event`), que cada suscriptor usa en su FilterPolicy de SQS para recibir solo lo que le interesa. Las suscripciones usan raw message delivery: el consumidor recibe el sobre de dominio directamente como cuerpo del mensaje, sin el sobre de SNS. Las colas SQS que escuchan fleetops\_documents\_events son responsabilidad de cada equipo suscriptor; este documento solo nombra las propias (sección 8.2).
+> **Broker decidido (ADR-DOC-12, v0.3): AWS SNS + SQS.** Cada microservicio de FleetOps publica en su propio tópico SNS, con el nombre **fleetops\_{slug}\_events** en snake\_case e inglés, donde el slug es el nombre del microservicio en singular (vehicle, driver, document, assignment, incident, maintenance, fuel, telemetry, notification, reporting; ADR-DOC-14); el de este servicio es **fleetops\_document\_events**. Cada evento lleva un Message Attribute **event\_type** (String) con el tipo de evento en snake\_case terminado en `_event` (por ejemplo `document_registered_event`), que cada suscriptor usa en su FilterPolicy de SQS para recibir solo lo que le interesa. Las suscripciones usan raw message delivery: el consumidor recibe el sobre de dominio directamente como cuerpo del mensaje, sin el sobre de SNS. En el sobre, `source` es el slug del microservicio que publica (`document` en este servicio) y `occurred_at` lleva el desfase -05:00. Las colas SQS que escuchan fleetops\_document\_events son responsabilidad de cada equipo suscriptor; este documento solo nombra las propias (sección 8.2).
 
 ### **8.1 Eventos que publica**
 
-Los eventos de los jobs usan un event\_id determinista para que dos instancias no generen duplicados distintos. La publicación sale del outbox hacia fleetops\_documents\_events, después de confirmar la transacción (ADR-DOC-05). Es un tópico SNS estándar (no FIFO): no hay orden garantizado entre tipos de evento distintos de un mismo documento: ver el riesgo correspondiente en la sección 11.
+Los eventos de los jobs usan un event\_id determinista para que dos instancias no generen duplicados distintos. La publicación sale del outbox hacia fleetops\_document\_events, después de confirmar la transacción (ADR-DOC-05). Es un tópico SNS estándar (no FIFO): no hay orden garantizado entre tipos de evento distintos de un mismo documento: ver el riesgo correspondiente en la sección 11.
 
 | Evento (Message Attribute event\_type) | Cuándo se publica | HU | Quién escucha |
 | :---- | :---- | :---- | :---- |
@@ -207,23 +216,46 @@ Los eventos de los jobs usan un event\_id determinista para que dos instancias n
 
 ### **8.2 Eventos que consume**
 
-Documentación consume, mediante colas SQS propias, los tópicos SNS de Vehículos y Conductores. Los nombres de esos tópicos son responsabilidad de cada equipo; se asume que siguen la misma convención (ADR-DOC-14) — **SUPUESTO, por confirmar con los equipos de Vehículos y Conductores**.
+Documentación consume, mediante colas SQS propias, los tópicos SNS de Vehículos y Conductores. Los nombres de esos tópicos los define cada equipo. **Conductores confirmó el suyo el 08-11-2026** con un ejemplo de evento. **Los de Vehículos siguen siendo un SUPUESTO**, que se nombra por analogía con el de Conductores.
 
 | Tópico SNS (origen) | Cola SQS propia (y su DLQ) | Evento (Message Attribute) | Acción |
 | :---- | :---- | :---- | :---- |
-| fleetops\_vehicles\_events | fleetops\_documents\_vehicle\_events\_queue (fleetops\_documents\_vehicle\_events\_dlq) | vehicle\_created\_event | Guarda vehicle\_id y license\_plate en vehicle\_replica con is\_active = true |
-| fleetops\_vehicles\_events | fleetops\_documents\_vehicle\_events\_queue | vehicle\_decommissioned\_event | Marca el vehículo con is\_active = false: deja de ser propietario válido y no acepta documentos nuevos; sus documentos se conservan (catálogo; HU-DOC-10 aún no lo cubre) |
-| fleetops\_drivers\_events | fleetops\_documents\_driver\_events\_queue (fleetops\_documents\_driver\_events\_dlq) | driver\_created\_event | Guarda driver\_id y full\_name en driver\_replica con is\_active = true |
-| fleetops\_drivers\_events | fleetops\_documents\_driver\_events\_queue | driver\_deactivated\_event | Marca el conductor con is\_active = false: deja de ser propietario válido y no acepta documentos nuevos; sus documentos se conservan (catálogo; HU-DOC-10 aún no lo cubre) |
+| fleetops\_vehicle\_events (SUPUESTO) | fleetops\_document\_vehicle\_events\_queue (fleetops\_document\_vehicle\_events\_dlq) | vehicle\_created\_event (SUPUESTO) | Guarda vehicle\_id y license\_plate en vehicle\_replica con is\_active = true |
+| fleetops\_vehicle\_events (SUPUESTO) | fleetops\_document\_vehicle\_events\_queue | vehicle\_decommissioned\_event (SUPUESTO) | Marca el vehículo con is\_active = false: deja de ser propietario válido y no acepta documentos nuevos; sus documentos se conservan |
+| fleetops\_driver\_events (confirmado) | fleetops\_document\_driver\_events\_queue (fleetops\_document\_driver\_events\_dlq) | driver\_activated\_event (confirmado) | Guarda driver\_id y full\_name en driver\_replica con is\_active = true (alta o reactivación) |
+| fleetops\_driver\_events (confirmado) | fleetops\_document\_driver\_events\_queue | driver\_deactivated\_event (SUPUESTO) | Marca el conductor con is\_active = false: deja de ser propietario válido y no acepta documentos nuevos; sus documentos se conservan |
 
-Reglas del consumidor: cada cola tiene su propio FilterPolicy de SNS→SQS para recibir solo esos dos tipos de evento; el mensaje se borra (Delete) solo tras procesar con éxito (si no, vuelve a ser visible al expirar el visibility timeout); idempotencia por event\_id guardado en la misma transacción que la réplica (processed\_events); descarte de eventos más antiguos que el ya aplicado (se compara el occurred\_at del evento con last\_event\_at de la réplica; no se usa record\_version); tolerancia a atributos desconocidos; redrive policy con maxReceiveCount = 3 hacia la DLQ correspondiente. Nunca se descarta un mensaje en silencio.
+Ejemplo confirmado por Conductores (raw message delivery; Message Attribute `event_type` = `driver_activated_event`):
+
+```json
+{
+  "event_id": "9b1d3c2e-7a4f-4e8b-a1c2-3d4e5f6a7b8c",
+  "event_type": "driver_activated_event",
+  "occurred_at": "2026-10-27T10:30:00-05:00",
+  "source": "driver",
+  "correlation_id": "6f1c2b7e-3d4a-4b5c-9d6e-7f8a9b0c1d2e",
+  "data": { "driver_id": "3f6c2a9e-8b1d-4c7a-9e21-5d0b7a1f4c88", "full_name": "Carlos Andrés Pérez" }
+}
+```
+
+Reglas del consumidor (HU-DOC-10):
+- **Filtro:** cada cola tiene su propio FilterPolicy de SNS→SQS, para recibir solo sus tipos de evento.
+- **Confirmación:** el mensaje se borra (Delete) solo tras procesarlo con éxito; si no, vuelve a ser visible al expirar el visibility timeout.
+- **Idempotencia:** el event\_id se guarda en processed\_events en la misma transacción que la réplica.
+- **Orden:** se descartan los eventos más antiguos que el ya aplicado, comparando el occurred\_at del evento con last\_event\_at de la réplica (no se usa record\_version). occurred\_at llega con el desfase de Colombia (-05:00), como todas las marcas de tiempo de FleetOps; se compara como instante, así que un desfase distinto no altera el orden.
+- **Tolerancia:** se ignoran los atributos y campos desconocidos.
+- **Errores:** redrive policy con maxReceiveCount = 3 hacia la DLQ correspondiente. Nunca se descarta un mensaje en silencio.
+- **Mensaje inválido** (implementado en v0.7): JSON roto, sin event\_id, sin el id de la entidad, con un event\_type no soportado, sin source, con occurred\_at sin desfase o con full\_name (más de 150 caracteres) o license\_plate (más de 10) fuera de rango. Se registra en el log con el motivo, el event\_id si existe y el número de recepción, y no se borra: llega a la DLQ por la redrive policy.
+- **Baja de un propietario desconocido:** si llega driver\_deactivated\_event o vehicle\_decommissioned\_event de una entidad que no está en la réplica, se registra como procesado sin cambios. Limitación: si después llega el alta de esa entidad, con un occurred\_at anterior, queda activa, porque no hay fila con la cual comparar. Se resuelve cuando los productores garanticen el orden o publiquen el estado completo.
+- **Disponibilidad:** un hilo por cola lee con long polling de 20 s; si SQS no responde, registra el error y reintenta cada MESSAGING\_RETRY\_DELAY (5 s por defecto) sin afectar los endpoints. Cada lectura pone en el MDC el correlation\_id del sobre, para enlazar los logs.
+- **Concurrencia:** la réplica se lee con bloqueo de fila (SELECT ... FOR UPDATE); dos entregas simultáneas del mismo evento chocan en la clave primaria de processed\_events y la segunda se reintenta y se descarta como repetida.
 
 ### **8.3 Flujos clave**
 
 **Vencimiento de un documento**
 
 1. El job diario marca el documento como EXPIRED y guarda document\_expired\_event en el outbox.  
-2. El publicador lo envía al tópico SNS fleetops\_documents\_events.  
+2. El publicador lo envía al tópico SNS fleetops\_document\_events.  
 3. Vehículos (o Conductores) agrega el bloqueo DOCUMENT y publica el cambio de estado; Notificaciones avisa; Reportes actualiza su base de lectura.
 
 **Renovación**
@@ -246,8 +278,8 @@ Reglas del consumidor: cada cola tiene su propio FilterPolicy de SNS→SQS para 
 | API REST | Validación, códigos de error, cabecera Location y OpenAPI | 01 a 05, 08, 09 |
 | Lógica de dominio | Estado según la fecha, unicidad, renovación y cumplimiento | 01 a 09 |
 | Job de vigencia | Ejecución diaria, recuperación al arrancar y manejo de umbrales | 06, 07 |
-| Publicador de outbox | Lee outbox\_events y publica en el tópico SNS fleetops\_documents\_events tras el commit | 05 y demás |
-| Consumidor de réplicas | Consumidores SQS idempotentes (fleetops\_documents\_vehicle\_events\_queue, fleetops\_documents\_driver\_events\_queue) que mantienen las réplicas | 10 |
+| Publicador de outbox | Lee outbox\_events y publica en el tópico SNS fleetops\_document\_events tras el commit | 05 y demás |
+| Consumidor de réplicas | Consumidores SQS idempotentes (fleetops\_document\_vehicle\_events\_queue, fleetops\_document\_driver\_events\_queue) que mantienen las réplicas | 10 |
 | Persistencia | Base de datos propia con restricciones únicas | Todas |
 | Salud y observabilidad | /health, logs JSON y correlación | 11 |
 
@@ -256,26 +288,27 @@ Reglas del consumidor: cada cola tiene su propio FilterPolicy de SNS→SQS para 
 | \# | Decisión | Por qué | Consecuencia / costo |
 | :---- | :---- | :---- | :---- |
 | ADR-DOC-01 | VALID, EXPIRING\_SOON y EXPIRED se calculan solo por fecha y días restantes (America/Bogota), sin depender de la evaluación del job. El estado se guarda (al registrar, corregir, renovar y en el job) y además se recalcula con la fecha actual en cada consulta | El estado mostrado es correcto aunque el job no haya corrido (HU-DOC-07) | La regla de cálculo es una sola (sección 6.2), compartida por el registro, las consultas y el job; los filtros por estado se calculan sobre expiration\_date y no sobre la columna guardada |
-| ADR-DOC-02 | Job diario a las 06:00 UTC (01:00 en Bogotá), con recuperación al arrancar y tabla issued\_alerts con restricción única | Impide duplicados con varias instancias o reejecuciones (HU-DOC-06) | La garantía vive en la base de datos, no en memoria |
+| ADR-DOC-02 | Job diario a la 01:00 hora de Bogotá (06:00 UTC), con recuperación al arrancar y tabla issued\_alerts con restricción única | Impide duplicados con varias instancias o reejecuciones (HU-DOC-06) | La garantía vive en la base de datos, no en memoria |
 | ADR-DOC-03 | Si un documento cumple varios umbrales sin emitir, se publica un solo evento con el umbral menor y los mayores se marcan como emitidos | Evita una avalancha de avisos tras una caída | Se pierden los avisos intermedios |
 | ADR-DOC-04 | La renovación crea un documento nuevo enlazado con previous\_document\_id y deja el anterior en REPLACED, en una transacción | Historial completo y operación de todo o nada | Exige control de concurrencia: restricción única más bloqueo o versión |
-| ADR-DOC-05 | Patrón Outbox: el evento se guarda junto con el cambio y otro proceso lo publica en SNS (fleetops\_documents\_events) | El estado nunca cambia sin que se publique el evento, ni viceversa | Un proceso adicional y una pequeña latencia |
+| ADR-DOC-05 | Patrón Outbox: el evento se guarda junto con el cambio y otro proceso lo publica en SNS (fleetops\_document\_events) | El estado nunca cambia sin que se publique el evento, ni viceversa | Un proceso adicional y una pequeña latencia |
 | ADR-DOC-06 | Réplicas locales mínimas (id y placa o nombre), sin HTTP a Vehículos ni Conductores | Evita el ciclo entre servicios y permite operar si otros caen | Desfase breve: un propietario recién creado puede rechazarse con 422 |
 | ADR-DOC-07 | Cada licencia guarda una sola categoría (license\_category), obligatoria en DRIVER\_LICENSE | La licencia es el único documento del conductor y su categoría forma parte de los datos del documento; guardarla evita consultar a Conductores por HTTP | Si un conductor tiene varias categorías, se registra solo la más específica según las políticas de la empresa; un cambio de categoría se registra como corrección (PATCH) o renovación |
 | ADR-DOC-08 | Anulación lógica con motivo; nunca borrado físico | Trazabilidad completa | Las consultas excluyen CANCELLED salvo que se filtre por ese estado |
-| ADR-DOC-09 | Umbrales en alert\_threshold\_days, validados al arrancar | Cambiar las alertas sin tocar código; una configuración inválida impide arrancar | Un cambio de umbrales exige reiniciar el servicio |
+| ADR-DOC-09 | Umbrales en ALERT\_THRESHOLD\_DAYS, validados al arrancar: enteros mayores o iguales a 0, sin repetidos y en cualquier orden; el servicio los ordena de mayor a menor (decisión P-07 del 08-11-2026) | Cambiar las alertas sin tocar código; una configuración inválida impide arrancar | Un cambio de umbrales exige reiniciar el servicio |
 | ADR-DOC-10 | Las reglas por tipo (propietario permitido, si vence, si es obligatorio y si se renueva) viven en document\_type | La tarjeta de propiedad no vence: el job, las alertas y las consultas se rigen por el tipo y no por condicionales dispersos | La matriz de tipos debe mantenerse alineada con el catálogo de eventos |
 | ADR-DOC-11 | Un solo documento activo por propietario y tipo, garantizado por una restricción única parcial en la base de datos (estados VALID, EXPIRING\_SOON y EXPIRED) | Refleja la decisión de negocio (tres documentos por vehículo, una licencia por conductor) y evita duplicados incluso con peticiones simultáneas | La renovación debe pasar el anterior a REPLACED antes de insertar el nuevo, en la misma transacción |
 | ADR-DOC-12 | El broker de mensajería es **AWS SNS + SQS** (decidido por el equipo FleetOps, 26-10-2026; resuelve el punto abierto 16). Cada microservicio publica en su propio tópico SNS; cada interesado se suscribe con su propia cola SQS. El núcleo sigue publicando y consumiendo solo a través de puertos de salida y de entrada (hexagonal) | Servicio gestionado y serverless (sin clúster propio); SNS→SQS con fan-out permite que cada equipo tenga su cola y su DLQ independientes, sin que Documentación conozca a sus consumidores | Tópicos SNS estándar, no FIFO: sin orden garantizado entre tipos de evento de un mismo documento (ver riesgo, sección 11); límite de 256 KB por mensaje; cambiar de broker en el futuro exige cambiar solo el adaptador de salida (y de entrada) de mensajería |
-| ADR-DOC-13 | La fecha de negocio («hoy») se calcula en America/Bogota mediante un reloj propio del servicio, con la zona configurable por variable de entorno. El job sigue programado a las 06:00 UTC (01:00 en Bogotá) | Con UTC, desde las 7 p. m. en Bogotá ya sería el día siguiente y un documento aparecería vencido horas antes (punto abierto 4) | Una sola fuente de fecha para el job y las consultas; las pruebas fijan el reloj para cubrir los casos de borde. Las marcas de tiempo (created\_at, occurred\_at) siguen en UTC |
-| ADR-DOC-14 | Nomenclatura y enrutamiento de mensajería: tópicos `fleetops_{slug}_events`; colas propias con el patrón `fleetops_{consumidor}_{origen}_events_queue` y su DLQ `..._dlq`; cada evento lleva un Message Attribute `event_type` (String) en snake\_case terminado en `_event` (p. ej. `document_registered_event`); el body es el sobre de dominio completo; raw message delivery habilitada en las suscripciones SQS | Nombres uniformes y legibles entre los microservicios de FleetOps (inglés y snake\_case); el Message Attribute permite que cada suscriptor filtre por tipo de evento con su FilterPolicy sin descargar ni parsear el body; raw delivery evita que el consumidor tenga que desenvolver el sobre de SNS para llegar al sobre de dominio | Todo tipo de evento nuevo debe anunciarse con su valor de event\_type antes de publicarse, para que los equipos consumidores ajusten su FilterPolicy; los nombres de tópicos de otros servicios (Vehículos, Conductores) deben confirmarse con cada equipo (sección 8.2) |
+| ADR-DOC-13 | La fecha de negocio («hoy») se calcula en America/Bogota mediante un reloj propio del servicio, con la zona configurable por variable de entorno. El job se programa a la 01:00 hora de Bogotá (06:00 UTC) | Con UTC, desde las 7 p. m. en Bogotá ya sería el día siguiente y un documento aparecería vencido horas antes (punto abierto 4) | Una sola fuente de fecha para el job y las consultas; las pruebas fijan el reloj para cubrir los casos de borde. Las marcas de tiempo (created\_at, updated\_at, cancelled\_at, occurred\_at) se guardan como instantes absolutos (timestamptz) y salen en la API, en los eventos y en las sesiones de la base de datos con el desfase -05:00 (decisión del equipo del 08-11-2026, P-02) |
+| ADR-DOC-14 | Nomenclatura y enrutamiento de mensajería: tópicos `fleetops_{slug}_events`, donde el slug es el nombre del microservicio en singular (vehicle, driver, document, assignment, incident, maintenance, fuel, telemetry, notification, reporting), así que el de este servicio es `fleetops_document_events`; el campo `source` del sobre lleva ese mismo slug (`document`); colas propias con el patrón `fleetops_{consumidor}_{origen}_events_queue` y su DLQ `..._dlq`; cada evento lleva un Message Attribute `event_type` (String) en snake\_case terminado en `_event` (p. ej. `document_registered_event`); el body es el sobre de dominio completo; raw message delivery habilitada en las suscripciones SQS | Nombres uniformes y legibles entre los microservicios de FleetOps (inglés y snake\_case); el Message Attribute permite que cada suscriptor filtre por tipo de evento con su FilterPolicy sin descargar ni parsear el body; raw delivery evita que el consumidor tenga que desenvolver el sobre de SNS para llegar al sobre de dominio | Todo tipo de evento nuevo debe anunciarse con su valor de event\_type antes de publicarse, para que los equipos consumidores ajusten su FilterPolicy; los nombres de tópicos de otros servicios (Vehículos, Conductores) deben confirmarse con cada equipo (sección 8.2). Los slugs y el formato de source quedaron definidos por el equipo el 08-11-2026 (punto abierto 17) |
+| ADR-DOC-15 | Desarrollo local de la mensajería con el emulador **Moto** (`motoserver/moto`, versión fija) en un docker compose propio (`infra/local-aws`), independiente del compose del servicio, y un script de provisión idempotente (`infra/local-aws/scripts/provision.sh`) que sirve igual para AWS real. El servicio elige el destino con perfiles de Spring: sin perfil, mensajería apagada; `local`, emulador con credenciales ficticias; `aws`, AWS real con la cadena de credenciales por defecto (rol de la instancia EC2). Las variables del emulador tienen nombres propios (`MESSAGING_ENDPOINT`, `MESSAGING_ACCESS_KEY_ID`), no los que el SDK lee por su cuenta | Desde 2026 la imagen de LocalStack exige `LOCALSTACK_AUTH_TOKEN` (cuenta de LocalStack) para arrancar; Moto es de código abierto, no pide cuenta y emula lo que usa el servicio (SNS, SQS, FilterPolicy, raw delivery y redrive a la DLQ). Un perfil por ambiente evita condicionales en el código y deja el despliegue actual sin cambios mientras no se active `aws` | Moto no valida políticas de IAM ni de colas ni simula latencia: esos aspectos solo se comprueban en AWS real. Moto guarda todo en memoria, así que al reiniciarlo hay que volver a provisionar. Las pruebas de integración usan la misma imagen con Testcontainers |
 
 ## **10\. Aspectos transversales**
 
 * **Seguridad y privacidad:** Los logs no incluyen contraseñas ni tokens. La autenticación y los roles se heredan del SAD general y aún no están definidos para este servicio.  
-* **Observabilidad:** logs JSON por salida estándar con marca de tiempo, nivel, correlation\_id y mensaje; el job termina con un resumen (evaluados, emitidos, fallidos); /health y las métricas de lag y de mensajes en la cola de errores del catálogo.  
+* **Observabilidad:** logs JSON por salida estándar con marca de tiempo en UTC (decisión del equipo del 08-11-2026, P-08: a diferencia de la API, los eventos y las sesiones de la base de datos, que usan -05:00), nivel, correlation\_id y mensaje; el job termina con un resumen (evaluados, emitidos, fallidos); /health y las métricas de lag y de mensajes en la cola de errores del catálogo.  
 * **Resiliencia:** con la base de datos caída, los endpoints responden 503 en menos de 2 segundos; con AWS SNS/SQS caído o inalcanzable, los endpoints siguen respondiendo y los eventos esperan en el outbox; un error en un documento no detiene la verificación de los demás.  
-* **Configuración:** credenciales, umbrales y conexión a AWS (región, tópico SNS, colas SQS) llegan por variables de entorno.  
+* **Configuración:** credenciales, umbrales y conexión a AWS (región, tópico SNS, colas SQS) llegan por variables de entorno. El perfil de Spring (SPRING\_PROFILES\_ACTIVE) elige entre el emulador local y AWS real (ADR-DOC-15); en AWS las credenciales vienen del rol de la instancia, nunca de variables.  
 * **Entrega:** Dockerfile; arranque con docker compose up , con su propia base de datos y esquema creado automáticamente; el pipeline compila y prueba en cada pull request y publica la imagen al integrar a main.  
 * **Pruebas:** unitarias para estados y fechas (por ejemplo, vencimiento el 20 de octubre: EXPIRING\_SOON ese día y EXPIRED desde el 21); de integración para renovaciones concurrentes, doble ejecución del job y tarjeta de propiedad sin vencimiento (fuera del job); de contrato para eventos y OpenAPI.
 
@@ -311,7 +344,8 @@ El backlog actual difiere del SAD general y del catálogo de topics en varios pu
 | 12 | Media · Réplicas | Solo consume created; HU-DOC-08 muestra placa y nombre desde la réplica; el orden se decide con occurred\_at | También dado\_de\_baja; los topics de estado traen record\_version | **Resuelto en este DAS** (secciones 6.4 y 8.2): se consumen vehicle\_decommissioned\_event y driver\_deactivated\_event, que marcan is\_active = false en la réplica; no se usa record\_version y el orden se decide con occurred\_at frente a last\_event\_at. El consumo de actualizaciones (por ejemplo, cambio de placa) sigue pendiente |
 | 14 | Media · Archivo digital | No se contempla adjuntar el documento escaneado | El contexto describe archivos físicos como origen del problema | Decidir si el servicio guarda el archivo, solo su referencia o nada |
 | 15 | Media · Roles y carga inicial | Ninguna HU define quién registra, anula o consulta, ni cómo cargar la flota existente | Seguridad por definir en el SAD general | Definir roles y evaluar una carga masiva inicial |
-| 16 | **Resuelto (v0.3, ADR-DOC-12 y ADR-DOC-14)** · Broker de mensajería | Las HU y el catálogo v1.0 asumen Kafka | AWS SNS + SQS, con tópicos y colas en snake\_case (fleetops\_documents\_events; patrón fleetops\_{slug}\_events) | El equipo FleetOps decidió AWS SNS + SQS el 26-10-2026. Falta: provisionar los tópicos y colas (o LocalStack en desarrollo), implementar el publicador SNS y los consumidores SQS, y confirmar con Vehículos y Conductores los nombres de sus propios tópicos |
+| 16 | **Resuelto (v0.3, ADR-DOC-12 y ADR-DOC-14)** · Broker de mensajería | Las HU y el catálogo v1.0 asumen Kafka | AWS SNS + SQS, con tópicos y colas en snake\_case (fleetops\_document\_events; patrón fleetops\_{slug}\_events) | El equipo FleetOps decidió AWS SNS + SQS el 26-10-2026. Desde v0.7 están los consumidores SQS (HU-DOC-10) y el script de provisión, probado con el emulador Moto (ADR-DOC-15). Falta: provisionar en AWS real, implementar el publicador SNS del outbox y confirmar con Vehículos sus tópicos y eventos (con Conductores, el resto de su catálogo) |
+| 17 | **Resuelto (v0.6, 08-11-2026)** · Nomenclatura de eventos entre equipos | El ejemplo de Conductores (08-11-2026) usa el tópico fleetops\_driver\_events, occurred\_at con -05:00 y source «driver» | ADR-DOC-14 fija el patrón fleetops\_{slug}\_events sin decir si el slug va en singular o en plural; este servicio publica en fleetops\_document\_events (plural), con occurred\_at en UTC y source «fleetops-document-service» | Decisión del equipo: el slug es el nombre del microservicio en singular (vehicle, driver, document, assignment, incident, maintenance, fuel, telemetry, notification, reporting), así que este servicio publica en fleetops\_document\_events con source «document»; todas las marcas de tiempo van con el desfase de Colombia (-05:00). Siguen pendientes el catálogo completo de eventos de Conductores y los eventos de Vehículos (P-04 y P-05 de `docs/G01_Historias_Usuario.xlsx`) |
 
 ## **13\. Próximos pasos**
 
@@ -402,7 +436,7 @@ erDiagram
     outbox_events {
         uuid event_id PK "event_id of the envelope; deterministic in jobs"
         varchar(60) event_type "document_registered_event, document_expiring_soon_event, document_expired_event, document_renewed_event"
-        varchar(150) topic "SNS: fleetops_documents_events"
+        varchar(150) topic "SNS: fleetops_document_events"
         varchar(36) message_key "owner_id; sin uso de particionado (SNS estándar, no FIFO)"
         uuid aggregate_id FK "documents.document_id"
         jsonb payload "full envelope; JSON object; no document_number"
@@ -494,7 +528,7 @@ erDiagram
 | PROPERTY\_CARD | Tarjeta de propiedad | VEHICLE | false | true | false | true | true |
 | DRIVER\_LICENSE | Licencia de conducción | DRIVER | true | true | true | true | true |
 
-**Supuestos del modelo físico** (el DAS no los fija; deben confirmarse): las longitudes de los textos; issuing\_entity obligatoria; el formato de license\_category (letra y dígito opcional); el catálogo de acciones de auditoría.
+**Supuestos del modelo físico** (el DAS no los fija; deben confirmarse): las longitudes de los textos; issuing\_entity obligatoria; el formato de license\_category (letra y dígito opcional); el catálogo de acciones de auditoría. Desde v0.5, HU-DOC-01 fija el formato de document\_number (5 a 30 caracteres) y la longitud de issuing\_entity (3 a 100). Las columnas, de 50 y 150 caracteres, los admiten sin cambios: la regla más estricta la aplica la aplicación.
 
 ## **15\. Diagrama Arquetipo**
 

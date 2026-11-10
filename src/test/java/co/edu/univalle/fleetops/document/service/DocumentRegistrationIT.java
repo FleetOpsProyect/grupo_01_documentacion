@@ -87,15 +87,19 @@ class DocumentRegistrationIT {
 
 		Map<String, Object> event = this.jdbc.queryForMap("""
 				SELECT event_type, topic, message_key, status, payload->>'event_type' AS envelope_type,
-				       payload->'data'->>'document_id' AS data_document_id, payload::text AS payload
+				       payload->'data'->>'document_id' AS data_document_id, payload->>'source' AS source,
+				       payload->>'occurred_at' AS occurred_at, payload::text AS payload
 				FROM document.outbox_events WHERE aggregate_id = ?""", documentId);
 		assertThat(event).containsEntry("event_type", "document_registered_event")
-			.containsEntry("topic", "fleetops_documents_events")
+			.containsEntry("topic", "fleetops_document_events")
 			.containsEntry("message_key", vehicle.toString())
 			.containsEntry("status", "PENDING")
 			.containsEntry("envelope_type", "document_registered_event")
+			.containsEntry("source", "document")
 			.containsEntry("data_document_id", documentId.toString());
 		assertThat((String) event.get("payload")).doesNotContain("document_number").doesNotContain(number);
+		// Marcas de tiempo con el desfase de Bogotá (DAS sec. 7, decisión P-02 del 08-11-2026)
+		assertThat((String) event.get("occurred_at")).endsWith("-05:00");
 
 		String auditedNumber = this.jdbc.queryForObject("""
 				SELECT changes->'after'->>'document_number' FROM document.document_audit_log
