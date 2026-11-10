@@ -29,6 +29,12 @@ dependencies {
 	runtimeOnly 'org.postgresql:postgresql'
 	// Salud y observabilidad: GET /health (HU-DOC-11)
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	// Mensajería AWS SQS con el SDK v2 directo (HU-DOC-10, decisión D-2). Versión fijada por el BOM; solo se usa
+	// el cliente síncrono, así que se excluye el cliente HTTP asíncrono (Netty)
+	implementation platform('software.amazon.awssdk:bom:2.46.7')
+	implementation('software.amazon.awssdk:sqs') {
+		exclude group: 'software.amazon.awssdk', module: 'netty-nio-client'
+	}
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
@@ -36,6 +42,12 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 	testImplementation 'org.testcontainers:testcontainers-postgresql'
+	// Prueba de integración del consumidor SQS contra el emulador Moto: el SNS solo lo usa la prueba para
+	// provisionar tópicos y publicar como lo haría Conductores o Vehículos (HU-DOC-10)
+	testImplementation('software.amazon.awssdk:sns') {
+		exclude group: 'software.amazon.awssdk', module: 'netty-nio-client'
+	}
+	testImplementation 'org.awaitility:awaitility'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 

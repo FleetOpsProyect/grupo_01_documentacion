@@ -24,6 +24,7 @@ import co.edu.univalle.fleetops.document.service.domain.model.DocumentRegistrati
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeRules;
 import co.edu.univalle.fleetops.document.service.domain.model.LicenseCategory;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
+import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
 import co.edu.univalle.fleetops.document.service.domain.model.ValidityPeriod;
 import co.edu.univalle.fleetops.document.service.domain.service.DocumentStatusCalculator;
 
@@ -97,10 +98,14 @@ public final class RegisterDocumentService implements RegisterDocumentUseCase {
 	}
 
 	private void checkOwnerIsActive(OwnerRef owner) {
-		if (!this.owners.isActiveOwner(owner)) {
-			throw new BusinessRuleViolationException("El propietario " + owner.ownerType() + " " + owner.ownerId()
-					+ " no existe o no está activo en la réplica local");
+		if (this.owners.isActiveOwner(owner)) {
+			return;
 		}
+		if (owner.ownerType() == OwnerType.DRIVER) {
+			throw new BusinessRuleViolationException("El conductor indicado no está registrado en el sistema");
+		}
+		throw new BusinessRuleViolationException("El propietario " + owner.ownerType() + " " + owner.ownerId()
+				+ " no existe o no está activo en la réplica local");
 	}
 
 	private void checkUniqueness(Document document) {
@@ -109,8 +114,7 @@ public final class RegisterDocumentService implements RegisterDocumentUseCase {
 					"Ya existe un documento " + document.documentType() + " no anulado con ese document_number");
 		}
 		if (this.documents.existsActiveByOwnerAndType(document.owner(), document.documentType())) {
-			throw new DomainConflictException("El propietario ya tiene un documento " + document.documentType()
-					+ " activo. Para cambiarlo use la renovación");
+			throw Document.activeDocumentConflict(document.documentType());
 		}
 	}
 

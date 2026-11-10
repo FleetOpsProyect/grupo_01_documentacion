@@ -1,0 +1,8 @@
+{
+  "event_type": "driver_activated_event",
+  "occurred_at": "2026-11-08T09:00:00-05:00",
+  "source": "driver",
+  "data": {
+    "full_name": "Sin identificadores"
+  }
+}

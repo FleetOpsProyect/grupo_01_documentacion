@@ -11,6 +11,7 @@ import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpired;
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentRegistered;
 import co.edu.univalle.fleetops.document.service.domain.event.DomainEvent;
 import co.edu.univalle.fleetops.document.service.domain.exception.BusinessRuleViolationException;
+import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflictException;
 import co.edu.univalle.fleetops.document.service.domain.service.DocumentStatusCalculator;
 
 /**
@@ -102,8 +103,7 @@ public final class Document {
 
 	private static void checkOwnerMatchesType(DocumentTypeRules rules, OwnerRef owner) {
 		if (rules.ownerType() != owner.ownerType()) {
-			throw new BusinessRuleViolationException("El tipo de documento " + rules.code()
-					+ " solo se registra para un propietario " + rules.ownerType());
+			throw new BusinessRuleViolationException("El tipo de documento no corresponde al tipo de propietario");
 		}
 	}
 
@@ -138,6 +138,20 @@ public final class Document {
 					"issuing_entity no puede tener más de " + ISSUING_ENTITY_MAX_LENGTH + " caracteres");
 		}
 		return value;
+	}
+
+	/**
+	 * Conflicto por un segundo documento activo del mismo tipo para el propietario (ADR-DOC-11). Lo usan la
+	 * validación del servicio de aplicación y la traducción del índice único, para que ambos respondan igual.
+	 * @param documentType tipo del documento que se intenta registrar
+	 */
+	public static DomainConflictException activeDocumentConflict(DocumentTypeCode documentType) {
+		Objects.requireNonNull(documentType, "documentType");
+		if (documentType == DocumentTypeCode.DRIVER_LICENSE) {
+			return new DomainConflictException("El conductor ya tiene una licencia vigente; use la renovación");
+		}
+		return new DomainConflictException(
+				"El propietario ya tiene un documento " + documentType + " activo. Para cambiarlo use la renovación");
 	}
 
 	/**

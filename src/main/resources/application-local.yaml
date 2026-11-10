@@ -1,0 +1,14 @@
+# Perfil local: desarrollo con el emulador de AWS (Moto) de infra/local-aws, independiente del docker compose del
+# servicio. Actívelo con SPRING_PROFILES_ACTIVE=local. Nunca lo use en un servidor.
+fleetops:
+  messaging:
+    enabled: true
+    # Debe coincidir con la región con que se provisionó el emulador (infra/local-aws/.env)
+    region: ${AWS_REGION}
+    # URL del emulador: http://localhost:<puerto> con bootRun; en docker compose la reemplaza
+    # MESSAGING_CONTAINER_ENDPOINT (host.docker.internal)
+    endpoint: ${MESSAGING_ENDPOINT}
+    # Credenciales ficticias que el emulador acepta. Variables propias (no AWS_ACCESS_KEY_ID) para que nunca se
+    # mezclen con credenciales reales de la máquina
+    access-key-id: ${MESSAGING_ACCESS_KEY_ID}
+    secret-access-key: ${MESSAGING_SECRET_ACCESS_KEY}

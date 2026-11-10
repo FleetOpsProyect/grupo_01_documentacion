@@ -6,7 +6,7 @@
  * no se publican.
  *
  * <p><b>Contenido previsto:</b> proceso que lee {@code outbox_events} tras el commit y publica en el
- * tópico SNS {@code fleetops_documents_events}, con el Message Attribute {@code event_type} (String) y el
+ * tópico SNS {@code fleetops_document_events}, con el Message Attribute {@code event_type} (String) y el
  * sobre de dominio como Message, en raw message delivery para los suscriptores SQS. Sin
  * {@code message_key} como clave de partición: es un tópico SNS estándar, no FIFO (ver riesgo de orden,
  * DAS sec. 11). Cambiar de broker es cambiar solo este adaptador.

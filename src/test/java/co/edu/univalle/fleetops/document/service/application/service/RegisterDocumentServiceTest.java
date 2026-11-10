@@ -68,6 +68,8 @@ class RegisterDocumentServiceTest {
 
 	private static final OwnerRef VEHICLE = new OwnerRef(OwnerType.VEHICLE, VEHICLE_ID);
 
+	private static final OwnerRef DRIVER = new OwnerRef(OwnerType.DRIVER, DRIVER_ID);
+
 	private static final DocumentTypeRules SOAT_RULES = new DocumentTypeRules(DocumentTypeCode.SOAT,
 			OwnerType.VEHICLE, true, true, true, true);
 
@@ -156,18 +158,35 @@ class RegisterDocumentServiceTest {
 		givenTheCatalogHas(LICENSE_RULES);
 		givenIds(DOCUMENT_ID, EVENT_ID);
 		givenTheClock();
-		given(this.owners.isActiveOwner(new OwnerRef(OwnerType.DRIVER, DRIVER_ID))).willReturn(true);
+		given(this.owners.isActiveOwner(DRIVER)).willReturn(true);
 		given(this.correlationIds.currentCorrelationId()).willReturn(Optional.empty());
-		RegisterDocumentCommand command = new RegisterDocumentCommand(DocumentTypeCode.DRIVER_LICENSE,
-				OwnerType.DRIVER, DRIVER_ID, "LIC-1020304050", "Secretaría de Movilidad de Cali",
-				LocalDate.of(2024, 3, 1), LocalDate.of(2034, 3, 1), "C1");
 
 		// Act
-		DocumentView view = this.service.register(command);
+		DocumentView view = this.service.register(licenseCommand(LocalDate.of(2034, 3, 1)));
 
 		// Assert
 		assertThat(view.licenseCategory()).isEqualTo("C1");
 		assertThat(view.ownerType()).isEqualTo(OwnerType.DRIVER);
+	}
+
+	@Test
+	void should_register_an_already_expired_driver_license_as_expired_with_both_events() {
+		// Arrange
+		givenTheCatalogHas(LICENSE_RULES);
+		givenIds(DOCUMENT_ID, EVENT_ID, SECOND_EVENT_ID);
+		givenTheClock();
+		given(this.owners.isActiveOwner(DRIVER)).willReturn(true);
+		given(this.correlationIds.currentCorrelationId()).willReturn(Optional.of(CORRELATION_ID));
+
+		// Act
+		DocumentView view = this.service.register(licenseCommand(TODAY.minusDays(1)));
+
+		// Assert (HU-DOC-02, criterio 6: Conductores recibe document_expired_event)
+		assertThat(view.status()).isEqualTo(DocumentStatus.EXPIRED);
+		InOrder order = inOrder(this.documents, this.outbox);
+		order.verify(this.documents).save(any(Document.class));
+		order.verify(this.outbox).append(eq(EVENT_ID), any(DocumentRegistered.class), eq(CORRELATION_ID));
+		order.verify(this.outbox).append(eq(SECOND_EVENT_ID), any(DocumentExpired.class), eq(CORRELATION_ID));
 	}
 
 	@Test
@@ -233,6 +252,21 @@ class RegisterDocumentServiceTest {
 	}
 
 	@Test
+	void should_reject_a_driver_that_is_not_registered_in_the_replica() {
+		// Arrange
+		givenTheCatalogHas(LICENSE_RULES);
+		givenIds(DOCUMENT_ID);
+		givenTheClock();
+		given(this.owners.isActiveOwner(DRIVER)).willReturn(false);
+
+		// Act + Assert (HU-DOC-02, criterio 1)
+		assertThatExceptionOfType(BusinessRuleViolationException.class)
+			.isThrownBy(() -> this.service.register(licenseCommand(LocalDate.of(2034, 3, 1))))
+			.withMessage("El conductor indicado no está registrado en el sistema");
+		verifyNoInteractions(this.documents, this.auditLog, this.outbox);
+	}
+
+	@Test
 	void should_reject_a_number_already_registered_for_the_type() {
 		// Arrange
 		givenTheCatalogHas(SOAT_RULES);
@@ -268,6 +302,25 @@ class RegisterDocumentServiceTest {
 	}
 
 	@Test
+	void should_ask_to_renew_when_the_driver_already_has_an_active_license() {
+		// Arrange
+		givenTheCatalogHas(LICENSE_RULES);
+		givenIds(DOCUMENT_ID);
+		givenTheClock();
+		given(this.owners.isActiveOwner(DRIVER)).willReturn(true);
+		given(this.documents.existsNotCancelledByTypeAndNumber(eq(DocumentTypeCode.DRIVER_LICENSE), any()))
+			.willReturn(false);
+		given(this.documents.existsActiveByOwnerAndType(DRIVER, DocumentTypeCode.DRIVER_LICENSE)).willReturn(true);
+
+		// Act + Assert (HU-DOC-02, criterio 5)
+		assertThatExceptionOfType(DomainConflictException.class)
+			.isThrownBy(() -> this.service.register(licenseCommand(LocalDate.of(2034, 3, 1))))
+			.withMessage("El conductor ya tiene una licencia vigente; use la renovación");
+		verify(this.documents, never()).save(any());
+		verifyNoInteractions(this.auditLog, this.outbox);
+	}
+
+	@Test
 	void should_reject_a_missing_command() {
 		assertThatNullPointerException().isThrownBy(() -> this.service.register(null)).withMessage("command");
 	}
@@ -283,6 +336,11 @@ class RegisterDocumentServiceTest {
 	private void givenTheClock() {
 		given(this.clock.today()).willReturn(TODAY);
 		given(this.clock.now()).willReturn(NOW);
+	}
+
+	private static RegisterDocumentCommand licenseCommand(LocalDate expirationDate) {
+		return new RegisterDocumentCommand(DocumentTypeCode.DRIVER_LICENSE, OwnerType.DRIVER, DRIVER_ID,
+				"LIC-1020304050", "Secretaría de Movilidad de Cali", LocalDate.of(2024, 3, 1), expirationDate, "C1");
 	}
 
 	private static RegisterDocumentCommand soatCommand(String number, LocalDate expirationDate) {

@@ -321,10 +321,10 @@ CREATE TABLE IF NOT EXISTS document.outbox_events (
 );
 
 COMMENT ON TABLE  document.outbox_events IS
-    'Eventos guardados en la misma transacción que el cambio (ADR-DOC-05). Se publican en AWS SNS, tópico fleetops_documents_events, tras el commit (ADR-DOC-12, ADR-DOC-14).';
+    'Eventos guardados en la misma transacción que el cambio (ADR-DOC-05). Se publican en AWS SNS, tópico fleetops_document_events, tras el commit (ADR-DOC-12, ADR-DOC-14).';
 COMMENT ON COLUMN document.outbox_events.event_id    IS 'event_id del sobre; determinista en los eventos del job (DAS sec. 8.1).';
 COMMENT ON COLUMN document.outbox_events.event_type  IS 'Valor del Message Attribute event_type en SNS, snake_case terminado en _event (ADR-DOC-14).';
-COMMENT ON COLUMN document.outbox_events.topic       IS 'Tópico SNS de destino: fleetops_documents_events (ADR-DOC-14). Sin uso de particionado (SNS estándar, no FIFO).';
+COMMENT ON COLUMN document.outbox_events.topic       IS 'Tópico SNS de destino: fleetops_document_events (ADR-DOC-14). Sin uso de particionado (SNS estándar, no FIFO).';
 COMMENT ON COLUMN document.outbox_events.message_key IS 'owner_id: viaja en el payload, no como clave de partición (SNS estándar, no FIFO; ver riesgo DAS sec. 11).';
 COMMENT ON COLUMN document.outbox_events.payload     IS 'Sobre estándar completo; nunca incluye document_number (DAS sec. 4.2).';
 
