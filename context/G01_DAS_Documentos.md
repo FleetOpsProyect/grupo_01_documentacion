@@ -1,6 +1,6 @@
 # **DAS – Servicio de Documentación y Seguros (FleetOps)**
 
-*Equipo Documentación y Seguros · Versión 0.7 · Noviembre 2026*
+*Equipo Documentación y Seguros · Versión 0.9 · Noviembre 2026*
 
 **Registro de cambios**
 
@@ -13,6 +13,8 @@
 | 0.5 | 08-11-2026 | Se refinan las historias HU-DOC-01 a HU-DOC-11 con las decisiones de este DAS y se propone HU-DOC-12 (validity-check), en `docs/G01_Historias_Usuario.xlsx` (4.1). De las historias se adoptan el formato de document\_number y la longitud de issuing\_entity, y la regla de que issue\_date no puede ser futura (6.3). Conductores confirmó su evento: tópico fleetops\_driver\_events, event\_type driver\_activated\_event, data {driver\_id, full\_name} (3 y 8.2). Por analogía, el supuesto del tópico de Vehículos pasa a fleetops\_vehicle\_events. Nuevo punto abierto 17 sobre la nomenclatura de eventos entre equipos |
 | 0.6 | 08-11-2026 | Respuestas del equipo a los pendientes de las historias: (P-01) el slug de los tópicos es el nombre del microservicio en singular, así que este servicio publica en fleetops\_document\_events y sus colas pasan a fleetops\_document\_{origen}\_events\_queue; (P-02) todas las marcas de tiempo salen con el desfase de Colombia (-05:00); (P-03) source es el slug del microservicio que publica (`document`); (P-06) se aprueba HU-DOC-12 y su endpoint entra en la sección 7; (P-07) ALERT\_THRESHOLD\_DAYS admite cualquier orden y se ordena. Cierra el punto abierto 17 (ADR-DOC-09, 13 y 14) |
 | 0.7 | 08-11-2026 | (P-08) Los logs se quedan en UTC: su @timestamp no lleva el desfase -05:00 de la API y los eventos (10). Se implementa HU-DOC-10: consumidor SQS de réplicas con el AWS SNS + SQS real o emulado; se detallan las reglas del consumidor que quedaron fijadas en el código (8.2). Nuevo ADR-DOC-15: desarrollo local con el emulador Moto en lugar de LocalStack, que desde 2026 exige una cuenta, y perfiles de Spring `local` y `aws`. Se actualiza el punto abierto 16 |
+| 0.8 | 15-11-2026 | Vehículos entregó ejemplos de sus eventos en fleetops\_vehicle\_events: el alta llega como `VEHICLE_CREATED` (también se acepta `vehicle_created_event`) y la baja es `vehicle_deleted_event`, que reemplaza el supuesto vehicle\_decommissioned\_event; la placa llega en data.plate (3 y 8.2). El ejemplo de alta no sigue ADR-DOC-14 (event\_type en mayúsculas, timestamp en lugar de occurred\_at, sin source ni correlation\_id): el consumidor lo tolera y la suscripción de Vehículos filtra sobre el cuerpo del mensaje; se abre el pendiente P-09 para alinearlo (8.2 y 12, punto 18). Al eliminar un vehículo sus documentos se conservan, pero ya no requieren seguimiento (8.2) |
+| 0.9 | 15-11-2026 | Decisión del equipo: todos los eventos se publican con el Message Attribute event\_type (`vehicle_created_event`, `vehicle_deleted_event`, `driver_activated_event`; la baja de conductores sigue como supuesto `driver_deactivated_event`) y todas las suscripciones filtran solo por ese atributo, nunca por el cuerpo. Los cuerpos que publican Vehículos y Conductores son su versión final: el consumidor toma el tipo del Message Attribute y lee cada cuerpo tal como llega (en el alta de vehículos, el instante en `timestamp` y sin source). Se cierran P-09 y el punto abierto 18 (8.2 y 12) |
 
 ## **1\. Introducción y alcance**
 
@@ -57,7 +59,7 @@ Documentación es productor de un solo tópico SNS y consumidor de dos. No llama
 
 | Dirección | Servicio | Qué intercambian |
 | :---- | :---- | :---- |
-| Consume | Vehículos (tópico SNS fleetops\_vehicle\_events, SUPUESTO por analogía con el de Conductores; por confirmar con ese equipo) | vehicle\_created\_event y vehicle\_decommissioned\_event (SUPUESTOS): qué vehículos son propietarios válidos |
+| Consume | Vehículos (tópico SNS fleetops\_vehicle\_events, confirmado el 15-11-2026) vehicle\_created\_event (alta) y vehicle\_deleted\_event (baja), confirmados: qué vehículos son propietarios válidos |
 | Consume | Conductores (tópico SNS fleetops\_driver\_events, confirmado por Conductores el 08-11-2026) | driver\_activated\_event (confirmado) y driver\_deactivated\_event (SUPUESTO): qué conductores son propietarios válidos |
 | Publica | Vehículos | document\_expired\_event y document\_renewed\_event de un vehículo: agrega o quita el bloqueo DOCUMENTO |
 | Publica | Conductores | document\_expired\_event y document\_renewed\_event de un conductor: agrega o quita el bloqueo DOCUMENTO |
@@ -216,12 +218,12 @@ Los eventos de los jobs usan un event\_id determinista para que dos instancias n
 
 ### **8.2 Eventos que consume**
 
-Documentación consume, mediante colas SQS propias, los tópicos SNS de Vehículos y Conductores. Los nombres de esos tópicos los define cada equipo. **Conductores confirmó el suyo el 08-11-2026** con un ejemplo de evento. **Los de Vehículos siguen siendo un SUPUESTO**, que se nombra por analogía con el de Conductores.
+Documentación consume, mediante colas SQS propias, los tópicos SNS de Vehículos y Conductores. Los nombres de esos tópicos los define cada equipo. **Conductores confirmó el suyo el 08-11-2026** y **Vehículos el 15-11-2026**, ambos con ejemplos de evento.
 
-| Tópico SNS (origen) | Cola SQS propia (y su DLQ) | Evento (Message Attribute) | Acción |
+| Tópico SNS (origen) | Cola SQS propia (y su DLQ) | Evento (Message Attribute event\_type) | Acción |
 | :---- | :---- | :---- | :---- |
-| fleetops\_vehicle\_events (SUPUESTO) | fleetops\_document\_vehicle\_events\_queue (fleetops\_document\_vehicle\_events\_dlq) | vehicle\_created\_event (SUPUESTO) | Guarda vehicle\_id y license\_plate en vehicle\_replica con is\_active = true |
-| fleetops\_vehicle\_events (SUPUESTO) | fleetops\_document\_vehicle\_events\_queue | vehicle\_decommissioned\_event (SUPUESTO) | Marca el vehículo con is\_active = false: deja de ser propietario válido y no acepta documentos nuevos; sus documentos se conservan |
+| fleetops\_vehicle\_events (confirmado) | fleetops\_document\_vehicle\_events\_queue (fleetops\_document\_vehicle\_events\_dlq) | vehicle\_created\_event (confirmado) | Guarda vehicle\_id y data.plate en vehicle\_replica (columna license\_plate) con is\_active = true |
+| fleetops\_vehicle\_events (confirmado) | fleetops\_document\_vehicle\_events\_queue | vehicle\_deleted\_event (confirmado) | Marca el vehículo con is\_active = false: deja de ser propietario válido y no acepta documentos nuevos. Sus documentos se conservan (no hay borrado físico, ADR-DOC-08), pero ya no requieren seguimiento: el job de vigencia (HU-DOC-06 y 07) debe omitir los documentos de propietarios inactivos |
 | fleetops\_driver\_events (confirmado) | fleetops\_document\_driver\_events\_queue (fleetops\_document\_driver\_events\_dlq) | driver\_activated\_event (confirmado) | Guarda driver\_id y full\_name en driver\_replica con is\_active = true (alta o reactivación) |
 | fleetops\_driver\_events (confirmado) | fleetops\_document\_driver\_events\_queue | driver\_deactivated\_event (SUPUESTO) | Marca el conductor con is\_active = false: deja de ser propietario válido y no acepta documentos nuevos; sus documentos se conservan |
 
@@ -238,15 +240,44 @@ Ejemplo confirmado por Conductores (raw message delivery; Message Attribute `eve
 }
 ```
 
+Cuerpos entregados por Vehículos (15-11-2026), que el equipo da como versión final. El alta se publica con el Message Attribute `event_type` = `vehicle_created_event`; su cuerpo lleva event\_type `VEHICLE_CREATED`, el instante en `timestamp` (UTC) y no trae source ni correlation\_id. La baja se publica con `event_type` = `vehicle_deleted_event`. Los campos que este servicio no usa se ignoran (criterio 5); status no se usa: is\_active depende solo del alta y de la baja.
+
+```json
+{
+  "event_id": "9b1d3c2e-7a4f-4e8b-a1c2-3d4e5f6a7b8c",
+  "event_type": "VEHICLE_CREATED",
+  "timestamp": "2026-11-08T14:43:00Z",
+  "data": {
+    "vehicle_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "plate": "ABC-123", "vehicle_type": "Camion",
+    "brand": "Chevrolet", "model": "NHR", "year": 2022, "color": "Blanco",
+    "notes": "En perfecto estado operacional", "odometer_km": 45000, "status": "Activo"
+  }
+}
+```
+
+```json
+{
+  "event_id": "7d2e9f10-4b6a-4c8e-9a1b-2c3d4e5f6a7b",
+  "event_type": "vehicle_deleted_event",
+  "occurred_at": "2026-10-27T10:30:00-05:00",
+  "source": "vehicle",
+  "correlation_id": "6f1c2b7e-3d4a-4b5c-9d6e-7f8a9b0c1d2e",
+  "data": { "vehicle_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6", "plate": "ABC123",
+            "deleted_at": "2026-10-27T10:30:00-05:00", "version_number": 9 }
+}
+```
+
 Reglas del consumidor (HU-DOC-10):
-- **Filtro:** cada cola tiene su propio FilterPolicy de SNS→SQS, para recibir solo sus tipos de evento.
+- **Filtro:** cada cola tiene su propio FilterPolicy de SNS→SQS sobre el Message Attribute event\_type (FilterPolicyScope = MessageAttributes; ADR-DOC-14), para recibir solo sus tipos de evento. Nunca se filtra por el cuerpo: un mensaje sin el atributo no llega a la cola.
+- **Tipo de evento:** lo decide el Message Attribute event\_type, que es también el que se guarda en processed\_events. El event\_type del cuerpo no se usa (en el alta de vehículos vale `VEHICLE_CREATED`).
+- **Cuerpo por evento:** cada cuerpo se lee tal como lo publica su productor. El instante sale de `timestamp` en vehicle\_created\_event y de `occurred_at` en los demás, con cualquier desfase ISO 8601 (-05:00 o UTC); si falta source, se usa el slug del productor (`vehicle` o `driver`).
 - **Confirmación:** el mensaje se borra (Delete) solo tras procesarlo con éxito; si no, vuelve a ser visible al expirar el visibility timeout.
 - **Idempotencia:** el event\_id se guarda en processed\_events en la misma transacción que la réplica.
 - **Orden:** se descartan los eventos más antiguos que el ya aplicado, comparando el occurred\_at del evento con last\_event\_at de la réplica (no se usa record\_version). occurred\_at llega con el desfase de Colombia (-05:00), como todas las marcas de tiempo de FleetOps; se compara como instante, así que un desfase distinto no altera el orden.
 - **Tolerancia:** se ignoran los atributos y campos desconocidos.
 - **Errores:** redrive policy con maxReceiveCount = 3 hacia la DLQ correspondiente. Nunca se descarta un mensaje en silencio.
-- **Mensaje inválido** (implementado en v0.7): JSON roto, sin event\_id, sin el id de la entidad, con un event\_type no soportado, sin source, con occurred\_at sin desfase o con full\_name (más de 150 caracteres) o license\_plate (más de 10) fuera de rango. Se registra en el log con el motivo, el event\_id si existe y el número de recepción, y no se borra: llega a la DLQ por la redrive policy.
-- **Baja de un propietario desconocido:** si llega driver\_deactivated\_event o vehicle\_decommissioned\_event de una entidad que no está en la réplica, se registra como procesado sin cambios. Limitación: si después llega el alta de esa entidad, con un occurred\_at anterior, queda activa, porque no hay fila con la cual comparar. Se resuelve cuando los productores garanticen el orden o publiquen el estado completo.
+- **Mensaje inválido** (implementado en v0.7): JSON roto, sin event\_id, sin el id de la entidad, sin Message Attribute event\_type o con un valor no soportado, sin el campo del instante de su evento, con una fecha sin desfase, o con full\_name (más de 150 caracteres) o plate (más de 10) vacíos o fuera de rango. Se registra en el log con el motivo, el event\_id si existe y el número de recepción, y no se borra: llega a la DLQ por la redrive policy.
+- **Baja de un propietario desconocido:** si llega driver\_deactivated\_event o vehicle\_deleted\_event de una entidad que no está en la réplica, se registra como procesado sin cambios. Limitación: si después llega el alta de esa entidad, con un occurred\_at anterior, queda activa, porque no hay fila con la cual comparar. Se resuelve cuando los productores garanticen el orden o publiquen el estado completo.
 - **Disponibilidad:** un hilo por cola lee con long polling de 20 s; si SQS no responde, registra el error y reintenta cada MESSAGING\_RETRY\_DELAY (5 s por defecto) sin afectar los endpoints. Cada lectura pone en el MDC el correlation\_id del sobre, para enlazar los logs.
 - **Concurrencia:** la réplica se lee con bloqueo de fila (SELECT ... FOR UPDATE); dos entregas simultáneas del mismo evento chocan en la clave primaria de processed\_events y la segunda se reintenta y se descarta como repetida.
 
@@ -341,11 +372,12 @@ El backlog actual difiere del SAD general y del catálogo de topics en varios pu
 | 8 | Media · Un documento activo por tipo | HU-DOC-01 y 02 solo rechazan otro documento VALID o EXPIRING\_SOON; con uno EXPIRED se podría crear un segundo documento del mismo tipo sin pasar por la renovación | Decisión: como máximo un documento de cada tipo por propietario | Responder 409 si ya existe un documento activo (VALID, EXPIRING\_SOON o EXPIRED) y exigir la renovación; garantizarlo con una restricción única parcial |
 | 9 | Media · Tarjeta de propiedad: reemplazo | No contempla una tarjeta nueva (traspaso o duplicado); la renovación (HU-DOC-05) exige una nueva fecha de vencimiento | La tarjeta no vence | Responder 422 si se intenta renovar la tarjeta, corregir errores con PATCH y definir si un traspaso o duplicado deja la tarjeta anterior en REPLACED o se corrige sobre el mismo documento |
 | 11 | **Resuelto (v0.3, 26-10-2026)** · PATCH y renovación | Cambiar expiration\_date de un vencido publica document\_renewed\_event sin documento nuevo (HU-DOC-04) | La renovación crea un documento nuevo (HU-DOC-05) | El equipo confirmó que el PATCH sí puede reactivar un documento vencido. Publica document\_renewed\_event con origin CORRECTION, sobre el mismo documento (no crea uno nuevo); ver docs/G01\_Endpoints\_Documentacion.xlsx, observación O-07 |
-| 12 | Media · Réplicas | Solo consume created; HU-DOC-08 muestra placa y nombre desde la réplica; el orden se decide con occurred\_at | También dado\_de\_baja; los topics de estado traen record\_version | **Resuelto en este DAS** (secciones 6.4 y 8.2): se consumen vehicle\_decommissioned\_event y driver\_deactivated\_event, que marcan is\_active = false en la réplica; no se usa record\_version y el orden se decide con occurred\_at frente a last\_event\_at. El consumo de actualizaciones (por ejemplo, cambio de placa) sigue pendiente |
+| 12 | Media · Réplicas | Solo consume created; HU-DOC-08 muestra placa y nombre desde la réplica; el orden se decide con occurred\_at | También dado\_de\_baja; los topics de estado traen record\_version | **Resuelto en este DAS** (secciones 6.4 y 8.2): se consumen vehicle\_deleted\_event (confirmado el 15-11-2026) y driver\_deactivated\_event, que marcan is\_active = false en la réplica; no se usa record\_version y el orden se decide con occurred\_at frente a last\_event\_at. El consumo de actualizaciones (por ejemplo, cambio de placa) sigue pendiente |
 | 14 | Media · Archivo digital | No se contempla adjuntar el documento escaneado | El contexto describe archivos físicos como origen del problema | Decidir si el servicio guarda el archivo, solo su referencia o nada |
 | 15 | Media · Roles y carga inicial | Ninguna HU define quién registra, anula o consulta, ni cómo cargar la flota existente | Seguridad por definir en el SAD general | Definir roles y evaluar una carga masiva inicial |
 | 16 | **Resuelto (v0.3, ADR-DOC-12 y ADR-DOC-14)** · Broker de mensajería | Las HU y el catálogo v1.0 asumen Kafka | AWS SNS + SQS, con tópicos y colas en snake\_case (fleetops\_document\_events; patrón fleetops\_{slug}\_events) | El equipo FleetOps decidió AWS SNS + SQS el 26-10-2026. Desde v0.7 están los consumidores SQS (HU-DOC-10) y el script de provisión, probado con el emulador Moto (ADR-DOC-15). Falta: provisionar en AWS real, implementar el publicador SNS del outbox y confirmar con Vehículos sus tópicos y eventos (con Conductores, el resto de su catálogo) |
 | 17 | **Resuelto (v0.6, 08-11-2026)** · Nomenclatura de eventos entre equipos | El ejemplo de Conductores (08-11-2026) usa el tópico fleetops\_driver\_events, occurred\_at con -05:00 y source «driver» | ADR-DOC-14 fija el patrón fleetops\_{slug}\_events sin decir si el slug va en singular o en plural; este servicio publica en fleetops\_document\_events (plural), con occurred\_at en UTC y source «fleetops-document-service» | Decisión del equipo: el slug es el nombre del microservicio en singular (vehicle, driver, document, assignment, incident, maintenance, fuel, telemetry, notification, reporting), así que este servicio publica en fleetops\_document\_events con source «document»; todas las marcas de tiempo van con el desfase de Colombia (-05:00). Siguen pendientes el catálogo completo de eventos de Conductores y los eventos de Vehículos (P-04 y P-05 de `docs/G01_Historias_Usuario.xlsx`) |
+| 18 | **Resuelto (v0.9, 15-11-2026)** · Formato de los eventos de Vehículos (P-09) | El ejemplo de alta (15-11-2026) usa event\_type `VEHICLE_CREATED`, `timestamp` en UTC y no trae source ni correlation\_id | ADR-DOC-14: event\_type en snake\_case terminado en `_event`, occurred\_at con -05:00, source y correlation\_id en el sobre, y el Message Attribute event\_type. Su vehicle\_deleted\_event sí cumple | Pedir a Vehículos que publique `vehicle_created_event` con el sobre estándar y el Message Attribute. Decisión del equipo: todos los eventos llevan el Message Attribute event\_type (en el alta, `vehicle_created_event`), los filtros van solo por él y los cuerpos de Vehículos son su versión final; el consumidor toma el tipo del atributo y lee cada cuerpo tal como llega |
 
 ## **13\. Próximos pasos**
 
@@ -420,7 +452,7 @@ erDiagram
     vehicle_replica {
         uuid vehicle_id PK
         varchar(10) license_plate "not blank"
-        boolean is_active "default true; false after vehicle_decommissioned_event"
+        boolean is_active "default true; false after vehicle_deleted_event"
         timestamptz last_event_at "occurred_at of last applied event"
         timestamptz updated_at "default now()"
     }

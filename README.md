@@ -293,10 +293,12 @@ Para publicar un evento como lo haría Conductores o Vehículos (ejemplos en [`i
 
 ```bash
 cd infra/local-aws
-docker compose run --rm provisioner /scripts/publish.sh fleetops_driver_events /events/driver_activated_event.json
+docker compose run --rm provisioner /scripts/publish.sh fleetops_driver_events driver_activated_event /events/driver_activated_event.json
+docker compose run --rm provisioner /scripts/publish.sh fleetops_vehicle_events vehicle_created_event /events/vehicle_created_event.json
+docker compose run --rm provisioner /scripts/publish.sh fleetops_vehicle_events vehicle_deleted_event /events/vehicle_deleted_event.json
 ```
 
-En Git Bash anteponga `MSYS_NO_PATHCONV=1`, para que no convierta `/scripts/...` en una ruta de Windows. Para ver un mensaje inválido llegar a la DLQ, publique `/events/invalid_event.json`: tras 3 recepciones (hasta unos 90 s con `SQS_VISIBILITY_TIMEOUT_SECONDS=30`) pasa a `fleetops_document_driver_events_dlq`.
+En Git Bash anteponga `MSYS_NO_PATHCONV=1`, para que no convierta `/scripts/...` en una ruta de Windows. Para ver un mensaje inválido llegar a la DLQ, publique `/events/invalid_event.json` en `fleetops_driver_events` con `driver_activated_event` (no trae `event_id` ni `driver_id`): tras 3 recepciones (hasta unos 90 s con `SQS_VISIBILITY_TIMEOUT_SECONDS=30`) pasa a `fleetops_document_driver_events_dlq`.
 
 Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` vuelve a ejecutar la provisión. Mientras está caído, el servicio sigue respondiendo y reintenta la lectura cada `MESSAGING_RETRY_DELAY` (criterio 7).
 
@@ -313,7 +315,7 @@ Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` 
    bash infra/local-aws/scripts/provision.sh
    ```
 
-   Sin `DRIVER_TOPIC_ARN` y `VEHICLE_TOPIC_ARN`, el script crea esos tópicos por nombre en su cuenta. Si los tópicos de los productores están en otra cuenta, ese equipo debe permitir la suscripción en la política de su tópico. Las colas quedan con long polling de 20 s, cifrado SSE-SQS, redrive a la DLQ con 3 recepciones y una política que solo deja escribir al tópico del productor (`aws:SourceArn`).
+   Sin `DRIVER_TOPIC_ARN` y `VEHICLE_TOPIC_ARN`, el script crea esos tópicos por nombre en su cuenta. Si los tópicos de los productores están en otra cuenta, ese equipo debe permitir la suscripción en la política de su tópico. Las colas quedan con long polling de 20 s, cifrado SSE-SQS, redrive a la DLQ con 3 recepciones y una política que solo deja escribir al tópico del productor (`aws:SourceArn`). Todas las suscripciones filtran solo por el Message Attribute `event_type` (nunca por el cuerpo): un mensaje sin ese atributo no llega a la cola. Volver a ejecutar el script actualiza las suscripciones existentes.
 3. **Permisos del servicio.** Asigne al rol de la instancia EC2 una política mínima, solo sobre las dos colas:
 
    ```json
@@ -340,7 +342,8 @@ Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` 
 **Limitaciones de esta versión**
 - Solo HU-DOC-01 y HU-DOC-02. `Location` apunta a `GET /documents/{id}`, pero ese endpoint (HU-DOC-03) todavía no existe y responde 404.
 - Los eventos propios quedan en `outbox_events` como PENDING: el publicador SNS del outbox todavía no existe.
-- Los eventos de Vehículos (`fleetops_vehicle_events`, `vehicle_created_event`, `vehicle_decommissioned_event`) y `driver_deactivated_event` son SUPUESTOS hasta que esos equipos los confirmen (P-04, P-05).
+- Vehículos confirmó sus eventos el 15-11-2026: Message Attribute `vehicle_created_event` y `vehicle_deleted_event`. Sus cuerpos son la versión final: el del alta lleva `event_type` `VEHICLE_CREATED`, el instante en `timestamp` y no trae `source`; el consumidor toma el tipo del Message Attribute. `driver_deactivated_event` sigue siendo un SUPUESTO (P-04).
+- Al eliminar un vehículo, sus documentos se conservan pero ya no requieren seguimiento: el job de vigencia (HU-DOC-06/07), cuando exista, debe omitir los documentos de propietarios inactivos.
 - Una baja que llega antes que el alta de la misma entidad se registra como procesada sin efecto (no hay fila que desactivar); si después llega el alta, la entidad queda activa. Se resuelve cuando los productores garanticen el orden o publiquen el estado completo.
 - `docker-compose.yml` monta `database/document_seed_dev.sql` también en el servidor (`deploy.yml` usa el mismo compose). Con las réplicas ya alimentadas por eventos, conviene sacar la semilla del compose de producción.
 - Sin migraciones: los scripts de `database/` solo corren cuando el volumen de PostgreSQL está vacío. Un cambio de esquema exige recrear la base.

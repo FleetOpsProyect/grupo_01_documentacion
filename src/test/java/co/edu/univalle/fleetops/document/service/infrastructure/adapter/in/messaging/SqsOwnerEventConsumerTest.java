@@ -17,6 +17,7 @@ import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
 import software.amazon.awssdk.services.sqs.model.GetQueueUrlResponse;
 import software.amazon.awssdk.services.sqs.model.Message;
+import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.MessageSystemAttributeName;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
@@ -72,7 +73,15 @@ class SqsOwnerEventConsumerTest {
 	}
 
 	private static Message message(String id, String body) {
+		return message(id, body, "driver_activated_event");
+	}
+
+	private static Message message(String id, String body, String eventType) {
+		Map<String, MessageAttributeValue> attributes = eventType == null ? Map.of()
+				: Map.of("event_type",
+						MessageAttributeValue.builder().dataType("String").stringValue(eventType).build());
 		return Message.builder()
+			.messageAttributes(attributes)
 			.messageId(id)
 			.receiptHandle("receipt-" + id)
 			.body(body)
@@ -107,6 +116,7 @@ class SqsOwnerEventConsumerTest {
 		assertThat(receive.getValue().maxNumberOfMessages()).isEqualTo(10);
 		assertThat(receive.getValue().messageSystemAttributeNames())
 			.containsExactly(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT);
+		assertThat(receive.getValue().messageAttributeNames()).containsExactly("event_type");
 		ArgumentCaptor<DeleteMessageRequest> delete = ArgumentCaptor.forClass(DeleteMessageRequest.class);
 		verify(this.sqs, times(2)).deleteMessage(delete.capture());
 		assertThat(delete.getAllValues()).extracting(DeleteMessageRequest::receiptHandle)
@@ -150,6 +160,19 @@ class SqsOwnerEventConsumerTest {
 	void should_not_delete_an_invalid_message_so_it_reaches_the_dlq() {
 		// Arrange (criterio 6)
 		givenQueue(message("m1", "{roto"));
+
+		// Act
+		consumer().pollOnce();
+
+		// Assert
+		verifyNoInteractions(this.useCase);
+		verify(this.sqs, never()).deleteMessage(any(DeleteMessageRequest.class));
+	}
+
+	@Test
+	void should_not_delete_a_message_without_the_event_type_attribute() {
+		// Arrange: sin Message Attribute no se sabe qué evento es (criterio 6)
+		givenQueue(message("m1", driverActivated(UUID.randomUUID().toString()), null));
 
 		// Act
 		consumer().pollOnce();

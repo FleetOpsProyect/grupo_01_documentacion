@@ -1,11 +1,17 @@
 {
-  "event_id": "019a5f00-0000-7000-8000-00000000a001",
-  "event_type": "vehicle_created_event",
-  "occurred_at": "2026-11-08T09:00:00-05:00",
-  "source": "vehicle",
-  "correlation_id": "019a5f00-0000-7000-8000-0000000c0001",
+  "event_id": "9b1d3c2e-7a4f-4e8b-a1c2-3d4e5f6a7b8c",
+  "event_type": "VEHICLE_CREATED",
+  "timestamp": "2026-11-08T14:43:00Z",
   "data": {
-    "vehicle_id": "01960000-0000-7000-8000-000000000011",
-    "license_plate": "JKL012"
+    "vehicle_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    "plate": "ABC-123",
+    "vehicle_type": "Camion",
+    "brand": "Chevrolet",
+    "model": "NHR",
+    "year": 2022,
+    "color": "Blanco",
+    "notes": "En perfecto estado operacional",
+    "odometer_km": 45000,
+    "status": "Activo"
   }
 }
