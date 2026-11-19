@@ -1,5 +1,6 @@
 package co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.repository;
 
+import java.util.List;
 import java.util.Collection;
 import java.util.UUID;
 
@@ -14,5 +15,8 @@ public interface DocumentJpaRepository extends JpaRepository<DocumentJpaEntity, 
 
 	boolean existsByOwnerTypeAndOwnerIdAndDocumentTypeAndStatusIn(String ownerType, UUID ownerId,
 			String documentType, Collection<String> statuses);
+
+	List<DocumentJpaEntity> findByOwnerTypeAndOwnerIdAndStatusIn(String ownerType, UUID ownerId,
+			Collection<String> statuses);
 
 }

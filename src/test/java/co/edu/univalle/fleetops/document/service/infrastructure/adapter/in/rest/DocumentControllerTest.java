@@ -2,6 +2,7 @@ package co.edu.univalle.fleetops.document.service.infrastructure.adapter.in.rest
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import co.edu.univalle.fleetops.document.service.application.port.in.DocumentView;
+import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceView;
 import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentCommand;
 import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentUseCase;
 import co.edu.univalle.fleetops.document.service.domain.exception.BusinessRuleViolationException;
@@ -21,6 +24,7 @@ import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflict
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
+import co.edu.univalle.fleetops.document.service.domain.exception.ResourceNotFoundException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItems;
@@ -31,6 +35,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -57,6 +62,9 @@ class DocumentControllerTest {
 
 	@MockitoBean
 	private RegisterDocumentUseCase registerDocument;
+
+	@MockitoBean
+	private ComplianceUseCase compliance;
 
 	@Test
 	void should_respond_201_with_location_snake_case_body_and_correlation_id() throws Exception {
@@ -177,6 +185,60 @@ class DocumentControllerTest {
 		this.mockMvc.perform(post("/documents").contentType(MediaType.APPLICATION_JSON).content(SOAT_REQUEST))
 			.andExpect(status().isUnprocessableContent())
 			.andExpect(jsonPath("$.detail").value("expiration_date es obligatoria para el tipo SOAT"));
+	}
+
+	@Test
+	void should_evaluate_vehicle_compliance_with_the_required_query_parameters() throws Exception {
+		given(this.compliance.evaluate(any())).willReturn(new ComplianceView(
+				OwnerType.VEHICLE, VEHICLE_ID, LocalDate.of(2026, 10, 26), false,
+				List.of(new ComplianceView.ComplianceDocumentView(DOCUMENT_ID,
+						DocumentTypeCode.SOAT, DocumentStatus.EXPIRED,
+						LocalDate.of(2026, 10, 20), -6)),
+				List.of(DocumentTypeCode.SOAT)));
+
+		this.mockMvc.perform(get("/documents/compliance")
+				.queryParam("owner_type", "VEHICLE")
+				.queryParam("owner_id", VEHICLE_ID.toString()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.owner_type").value("VEHICLE"))
+			.andExpect(jsonPath("$.owner_id").value(VEHICLE_ID.toString()))
+			.andExpect(jsonPath("$.evaluated_on").value("2026-10-26"))
+			.andExpect(jsonPath("$.compliant").value(false))
+			.andExpect(jsonPath("$.documents[0].document_id").value(DOCUMENT_ID.toString()))
+			.andExpect(jsonPath("$.documents[0].days_remaining").value(-6))
+			.andExpect(jsonPath("$.missing_documents[0]").value("SOAT"));
+	}
+
+	@Test
+	void should_respond_400_when_compliance_parameters_are_missing() throws Exception {
+		this.mockMvc.perform(get("/documents/compliance"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.detail")
+				.value("Los parámetros owner_type y owner_id son obligatorios y válidos"));
+		verifyNoInteractions(this.compliance);
+	}
+
+	@Test
+	void should_respond_400_when_compliance_parameters_are_invalid() throws Exception {
+		this.mockMvc.perform(get("/documents/compliance")
+				.queryParam("owner_type", "BOAT")
+				.queryParam("owner_id", "not-a-uuid"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.detail")
+				.value("Los parámetros owner_type y owner_id son obligatorios y válidos"));
+		verifyNoInteractions(this.compliance);
+	}
+
+	@Test
+	void should_respond_404_when_the_compliance_owner_does_not_exist() throws Exception {
+		given(this.compliance.evaluate(any()))
+			.willThrow(new ResourceNotFoundException("Propietario no encontrado"));
+
+		this.mockMvc.perform(get("/documents/compliance")
+				.queryParam("owner_type", "VEHICLE")
+				.queryParam("owner_id", VEHICLE_ID.toString()))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.detail").value("Propietario no encontrado"));
 	}
 
 	private static DocumentView soatView() {

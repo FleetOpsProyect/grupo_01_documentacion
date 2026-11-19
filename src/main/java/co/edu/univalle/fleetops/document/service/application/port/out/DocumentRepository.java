@@ -1,5 +1,9 @@
 package co.edu.univalle.fleetops.document.service.application.port.out;
 
+import java.time.LocalDate;
+import java.util.List;
+import java.util.UUID;
+
 import co.edu.univalle.fleetops.document.service.domain.model.Document;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentNumber;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
@@ -28,5 +32,13 @@ public interface DocumentRepository {
 	 * datos rechaza el documento por unicidad, por ejemplo con dos registros simultáneos
 	 */
 	void save(Document document);
+
+	/**
+	 * Documentos vigentes o vencidos del propietario, excluyendo REPLACED y CANCELLED.
+	 */
+	List<ComplianceDocumentSnapshot> findComplianceDocuments(OwnerRef owner);
+
+	record ComplianceDocumentSnapshot(UUID documentId, DocumentTypeCode documentType, LocalDate expirationDate) {
+	}
 
 }
