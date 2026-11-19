@@ -26,6 +26,9 @@ class ComplianceServiceTest {
 	private static final UUID VEHICLE_ID =
 		UUID.fromString("01960000-0000-7000-8000-000000000001");
 
+	private static final UUID DRIVER_ID =
+		UUID.fromString("01960000-0000-7000-8000-000000000101");
+
 	private static final LocalDate TODAY = LocalDate.of(2026, 10, 26);
 
 	private final OwnerReplicaRepository owners = mock(OwnerReplicaRepository.class);
@@ -90,6 +93,40 @@ class ComplianceServiceTest {
 				DocumentTypeCode.PROPERTY_CARD);
 		assertThat(view.documents()).hasSize(1);
 		assertThat(view.documents().getFirst().daysRemaining()).isEqualTo(-1);
+	}
+
+	@Test
+	void should_evaluate_only_the_driver_license_for_a_driver() {
+		OwnerRef owner = new OwnerRef(OwnerType.DRIVER, DRIVER_ID);
+		given(this.owners.existsOwner(owner)).willReturn(true);
+		given(this.clock.today()).willReturn(TODAY);
+		given(this.documents.findComplianceDocuments(owner)).willReturn(List.of(
+				new DocumentRepository.ComplianceDocumentSnapshot(
+						UUID.fromString("019a2f4e-8b1c-7d2a-9e3f-1a2b3c4d5e72"),
+						DocumentTypeCode.DRIVER_LICENSE, TODAY.plusDays(100))));
+
+		ComplianceView view = this.service.evaluate(owner);
+
+		assertThat(view.compliant()).isTrue();
+		assertThat(view.documents()).extracting(ComplianceView.ComplianceDocumentView::documentType)
+			.containsExactly(DocumentTypeCode.DRIVER_LICENSE);
+		assertThat(view.missingDocuments()).isEmpty();
+	}
+
+	@Test
+	void should_mark_a_non_valid_property_card_as_missing() {
+		OwnerRef owner = new OwnerRef(OwnerType.VEHICLE, VEHICLE_ID);
+		given(this.owners.existsOwner(owner)).willReturn(true);
+		given(this.clock.today()).willReturn(TODAY);
+		given(this.documents.findComplianceDocuments(owner)).willReturn(List.of(
+				new DocumentRepository.ComplianceDocumentSnapshot(
+						UUID.fromString("019a2f4e-8b1c-7d2a-9e3f-1a2b3c4d5e73"),
+						DocumentTypeCode.PROPERTY_CARD, TODAY.minusDays(1))));
+
+		ComplianceView view = this.service.evaluate(owner);
+
+		assertThat(view.compliant()).isFalse();
+		assertThat(view.missingDocuments()).contains(DocumentTypeCode.PROPERTY_CARD);
 	}
 
 }
