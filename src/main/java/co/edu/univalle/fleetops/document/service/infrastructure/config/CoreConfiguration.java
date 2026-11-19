@@ -10,6 +10,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.SyncOwnerReplicaUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.out.AuditLogRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.BusinessClock;
@@ -21,6 +22,7 @@ import co.edu.univalle.fleetops.document.service.application.port.out.OutboxRepo
 import co.edu.univalle.fleetops.document.service.application.port.out.OwnerReplicaRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.ProcessedEventRepository;
 import co.edu.univalle.fleetops.document.service.application.service.RegisterDocumentService;
+import co.edu.univalle.fleetops.document.service.application.service.ComplianceService;
 import co.edu.univalle.fleetops.document.service.application.service.SyncOwnerReplicaService;
 import co.edu.univalle.fleetops.document.service.domain.service.DocumentStatusCalculator;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.clock.ZonedBusinessClock;
@@ -37,10 +39,14 @@ import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.obse
 public class CoreConfiguration {
 
 	@Bean
+	ComplianceUseCase complianceUseCase(OwnerReplicaRepository owners, DocumentRepository documents,
+			BusinessClock businessClock, DocumentStatusCalculator statusCalculator) {
+		return new ComplianceService(owners, documents, businessClock, statusCalculator);
+	}
+	@Bean
 	Clock systemClock() {
 		return Clock.systemUTC();
 	}
-
 	@Bean
 	BusinessClock businessClock(Clock systemClock, DocumentServiceProperties properties) {
 		return new ZonedBusinessClock(systemClock, properties.businessTimeZone());
