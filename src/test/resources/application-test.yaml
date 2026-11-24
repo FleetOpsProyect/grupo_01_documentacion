@@ -30,3 +30,6 @@ fleetops:
   documents:
     business-time-zone: America/Bogota
     alert-threshold-days: 30,15,7,1
+    # Las pruebas llaman el caso de uso directamente: sin programación ni recuperación al arrancar
+    expiration-job:
+      enabled: false

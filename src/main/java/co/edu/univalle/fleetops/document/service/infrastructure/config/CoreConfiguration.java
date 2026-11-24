@@ -9,8 +9,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.CheckExpirationsUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.EvaluateDocumentExpirationUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.SyncOwnerReplicaUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.out.AuditLogRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.BusinessClock;
@@ -18,12 +20,17 @@ import co.edu.univalle.fleetops.document.service.application.port.out.Correlatio
 import co.edu.univalle.fleetops.document.service.application.port.out.DocumentRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.DocumentTypeRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.IdGenerator;
+import co.edu.univalle.fleetops.document.service.application.port.out.IssuedAlertRepository;
+import co.edu.univalle.fleetops.document.service.application.port.out.JobRunRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.OutboxRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.OwnerReplicaRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.ProcessedEventRepository;
-import co.edu.univalle.fleetops.document.service.application.service.RegisterDocumentService;
+import co.edu.univalle.fleetops.document.service.application.service.CheckExpirationsService;
 import co.edu.univalle.fleetops.document.service.application.service.ComplianceService;
+import co.edu.univalle.fleetops.document.service.application.service.EvaluateDocumentExpirationService;
+import co.edu.univalle.fleetops.document.service.application.service.RegisterDocumentService;
 import co.edu.univalle.fleetops.document.service.application.service.SyncOwnerReplicaService;
+import co.edu.univalle.fleetops.document.service.domain.service.AlertThresholdPolicy;
 import co.edu.univalle.fleetops.document.service.domain.service.DocumentStatusCalculator;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.clock.ZonedBusinessClock;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.id.UuidV7Generator;
@@ -35,7 +42,7 @@ import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.obse
  * aplicación son clases planas que solo se crean aquí.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(DocumentServiceProperties.class)
+@EnableConfigurationProperties({ DocumentServiceProperties.class, ExpirationJobProperties.class })
 public class CoreConfiguration {
 
 	@Bean
@@ -94,6 +101,39 @@ public class CoreConfiguration {
 			PlatformTransactionManager transactionManager) {
 		SyncOwnerReplicaService service = new SyncOwnerReplicaService(owners, processedEvents, businessClock);
 		return new TransactionalSyncOwnerReplicaUseCase(service, new TransactionTemplate(transactionManager));
+	}
+
+	/**
+	 * Umbrales de ALERT_THRESHOLD_DAYS para el job de vigencia (ADR-DOC-03, ADR-DOC-09).
+	 */
+	@Bean
+	AlertThresholdPolicy alertThresholdPolicy(DocumentServiceProperties properties) {
+		return new AlertThresholdPolicy(properties.alertThresholdDays());
+	}
+
+	/**
+	 * HU-DOC-06: evaluación de un documento, en su propia transacción (decorador).
+	 */
+	@Bean
+	EvaluateDocumentExpirationUseCase evaluateDocumentExpirationUseCase(DocumentRepository documents,
+			IssuedAlertRepository issuedAlerts, AuditLogRepository auditLog, OutboxRepository outbox,
+			BusinessClock businessClock, DocumentStatusCalculator statusCalculator, AlertThresholdPolicy alertPolicy,
+			PlatformTransactionManager transactionManager) {
+		EvaluateDocumentExpirationService service = new EvaluateDocumentExpirationService(documents, issuedAlerts,
+				auditLog, outbox, businessClock, statusCalculator, alertPolicy);
+		return new TransactionalEvaluateDocumentExpirationUseCase(service,
+				new TransactionTemplate(transactionManager));
+	}
+
+	/**
+	 * HU-DOC-06: verificación diaria. No es transaccional: cada documento se confirma por separado. Existe aunque el
+	 * job esté apagado; lo programa {@link ExpirationJobConfiguration}.
+	 */
+	@Bean
+	CheckExpirationsUseCase checkExpirationsUseCase(JobRunRepository jobRuns, DocumentRepository documents,
+			EvaluateDocumentExpirationUseCase evaluator, BusinessClock businessClock,
+			AlertThresholdPolicy alertPolicy) {
+		return new CheckExpirationsService(jobRuns, documents, evaluator, businessClock, alertPolicy);
 	}
 
 }
