@@ -20,51 +20,52 @@ import co.edu.univalle.fleetops.document.service.domain.service.StatusEvaluation
  */
 public final class GetDocumentService implements GetDocumentUseCase {
 
-    private final DocumentRepository documents;
+	private final DocumentRepository documents;
 
-    private final BusinessClock clock;
+	private final BusinessClock clock;
 
-    private final DocumentStatusCalculator statusCalculator;
+	private final DocumentStatusCalculator statusCalculator;
 
-    public GetDocumentService(
-            DocumentRepository documents,
-            BusinessClock clock,
-            DocumentStatusCalculator statusCalculator) {
+	public GetDocumentService(
+			DocumentRepository documents,
+			BusinessClock clock,
+			DocumentStatusCalculator statusCalculator) {
 
-        this.documents = Objects.requireNonNull(documents, "documents");
-        this.clock = Objects.requireNonNull(clock, "clock");
-        this.statusCalculator = Objects.requireNonNull(
-                statusCalculator, "statusCalculator");
-    }
+		this.documents = Objects.requireNonNull(documents, "documents");
+		this.clock = Objects.requireNonNull(clock, "clock");
+		this.statusCalculator = Objects.requireNonNull(
+				statusCalculator, "statusCalculator");
+	}
 
-    @Override
-    public DocumentView getById(UUID documentId) {
+	@Override
+	public DocumentView getById(UUID documentId) {
 
-        Objects.requireNonNull(documentId, "documentId");
+		Objects.requireNonNull(documentId, "documentId");
 
-        Document document = this.documents.findById(documentId)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "Documento no encontrado"));
+		Document document = this.documents.findById(documentId)
+				.orElseThrow(() ->
+						new ResourceNotFoundException(
+								"Documento no encontrado"));
 
-        LocalDate today = this.clock.today();
+		LocalDate today = this.clock.today();
 
-        StatusEvaluation evaluation;
+		StatusEvaluation evaluation;
 
-        if (document.status() == DocumentStatus.REPLACED
-                || document.status() == DocumentStatus.CANCELLED) {
+		if (document.status() == DocumentStatus.REPLACED
+				|| document.status() == DocumentStatus.CANCELLED) {
 
-            evaluation = new StatusEvaluation(
-                    document.status(), null);
+			evaluation = new StatusEvaluation(
+					document.status(), null);
 
-        } else {
+		}
+		else {
 
-            evaluation = this.statusCalculator.evaluate(
-                    document.validity().expirationDate(),
-                    today);
-        }
+			evaluation = this.statusCalculator.evaluate(
+					document.validity().expirationDate(),
+					today);
+		}
 
-        return DocumentView.of(document, evaluation);
-    }
+		return DocumentView.of(document, evaluation);
+	}
 
 }

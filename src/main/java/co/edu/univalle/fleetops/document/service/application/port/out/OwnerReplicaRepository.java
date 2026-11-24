@@ -12,6 +12,11 @@ import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
 public interface OwnerReplicaRepository {
 
 	/**
+	 * El propietario existe en alguna réplica local, independientemente de si está activo.
+	 */
+	boolean existsOwner(OwnerRef owner);
+
+	/**
 	 * El propietario existe en la réplica y no fue dado de baja (is_active = true, DAS sec. 6.3).
 	 */
 	boolean isActiveOwner(OwnerRef owner);

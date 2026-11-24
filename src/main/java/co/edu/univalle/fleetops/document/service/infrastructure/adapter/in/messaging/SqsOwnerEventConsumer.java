@@ -13,6 +13,7 @@ import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
+import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.MessageSystemAttributeName;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 
@@ -41,6 +42,11 @@ public final class SqsOwnerEventConsumer implements SmartLifecycle {
 	private static final Logger LOGGER = LoggerFactory.getLogger(SqsOwnerEventConsumer.class);
 
 	private static final Duration STOP_TIMEOUT = Duration.ofSeconds(2);
+
+	/**
+	 * Message Attribute por el que filtran las suscripciones y que decide el tipo de evento (ADR-DOC-14).
+	 */
+	static final String EVENT_TYPE_ATTRIBUTE = "event_type";
 
 	private final SqsClient sqs;
 
@@ -139,6 +145,7 @@ public final class SqsOwnerEventConsumer implements SmartLifecycle {
 			.maxNumberOfMessages(this.maxMessages)
 			.waitTimeSeconds(this.waitTimeSeconds)
 			.messageSystemAttributeNames(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT)
+			.messageAttributeNames(EVENT_TYPE_ATTRIBUTE)
 			.build()).messages();
 		for (Message message : messages) {
 			if (this.stopRequested) {
@@ -162,7 +169,7 @@ public final class SqsOwnerEventConsumer implements SmartLifecycle {
 	private void handle(String url, Message message) {
 		String receiveCount = message.attributes().get(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT);
 		try {
-			OwnerEventMessage parsed = this.mapper.map(message.body());
+			OwnerEventMessage parsed = this.mapper.map(eventType(message), message.body());
 			if (parsed.correlationId() != null) {
 				MDC.put(CorrelationIdFilter.MDC_KEY, parsed.correlationId());
 			}
@@ -183,6 +190,11 @@ public final class SqsOwnerEventConsumer implements SmartLifecycle {
 		finally {
 			MDC.remove(CorrelationIdFilter.MDC_KEY);
 		}
+	}
+
+	private static String eventType(Message message) {
+		MessageAttributeValue value = message.messageAttributes().get(EVENT_TYPE_ATTRIBUTE);
+		return value == null ? null : value.stringValue();
 	}
 
 	private void delete(String url, Message message) {

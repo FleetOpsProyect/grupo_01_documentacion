@@ -421,7 +421,7 @@ CREATE TABLE IF NOT EXISTS document.vehicle_replica (
 );
 
 COMMENT ON TABLE  document.vehicle_replica IS 'Réplica mínima de Vehículos alimentada por eventos (DAS sec. 6.4).';
-COMMENT ON COLUMN document.vehicle_replica.is_active     IS 'FALSE tras vehicle_decommissioned_event: deja de ser propietario válido.';
+COMMENT ON COLUMN document.vehicle_replica.is_active     IS 'FALSE tras vehicle_deleted_event: deja de ser propietario válido.';
 COMMENT ON COLUMN document.vehicle_replica.last_event_at IS 'occurred_at del último evento aplicado; descarta eventos más antiguos.';
 
 CREATE TABLE IF NOT EXISTS document.driver_replica (

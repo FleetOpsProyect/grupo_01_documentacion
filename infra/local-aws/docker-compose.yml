@@ -5,7 +5,8 @@
 #
 # Uso (desde esta carpeta, con .env copiado de .env.example):
 #   docker compose up -d          # arranca Moto y provisiona tópicos, colas, DLQ y suscripciones
-#   docker compose run --rm provisioner /scripts/publish.sh fleetops_driver_events /events/driver_activated_event.json
+#   docker compose run --rm provisioner /scripts/publish.sh fleetops_driver_events driver_activated_event \
+#     /events/driver_activated_event.json
 #   docker compose down           # Moto guarda todo en memoria: al bajarlo se pierde y el próximo «up» lo recrea
 #
 # El servicio se conecta con SPRING_PROFILES_ACTIVE=local (ver application-local.yaml y el .env del proyecto).

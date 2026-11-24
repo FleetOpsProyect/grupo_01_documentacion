@@ -55,7 +55,7 @@ public final class Document {
 	private final List<DomainEvent> domainEvents = new ArrayList<>();
 
 	private Document(DocumentRegistration registration, DocumentTypeCode documentType, String issuingEntity,
-			DocumentStatus status, Instant now) {
+					 DocumentStatus status, Instant now) {
 		this.id = registration.documentId();
 		this.documentType = documentType;
 		this.owner = registration.owner();
@@ -72,8 +72,8 @@ public final class Document {
 	}
 
 	private Document(DocumentRegistration registration, DocumentTypeCode documentType, String issuingEntity,
-			DocumentStatus status, Instant createdAt, Instant updatedAt, UUID previousDocumentId,
-			String cancellationReason, Instant cancelledAt) {
+					 DocumentStatus status, Instant createdAt, Instant updatedAt, UUID previousDocumentId,
+					 String cancellationReason, Instant cancelledAt) {
 		this.id = registration.documentId();
 		this.documentType = documentType;
 		this.owner = registration.owner();
@@ -92,15 +92,16 @@ public final class Document {
 	/**
 	 * Registra un documento nuevo (HU-DOC-01 y HU-DOC-02) y deja pendientes sus eventos de dominio:
 	 * {@link DocumentRegistered} siempre y {@link DocumentExpired} si nace vencido.
+	 *
 	 * @param registration datos del documento
-	 * @param rules reglas del tipo leídas del catálogo
-	 * @param calculator regla única de estado
-	 * @param today fecha de negocio
-	 * @param now instante actual en UTC
+	 * @param rules        reglas del tipo leídas del catálogo
+	 * @param calculator   regla única de estado
+	 * @param today        fecha de negocio
+	 * @param now          instante actual en UTC
 	 * @throws BusinessRuleViolationException si los datos no cumplen las reglas del tipo
 	 */
 	public static Document register(DocumentRegistration registration, DocumentTypeRules rules,
-			DocumentStatusCalculator calculator, LocalDate today, Instant now) {
+									DocumentStatusCalculator calculator, LocalDate today, Instant now) {
 		Objects.requireNonNull(registration, "registration");
 		Objects.requireNonNull(rules, "rules");
 		Objects.requireNonNull(calculator, "calculator");
@@ -123,8 +124,8 @@ public final class Document {
 	}
 
 	public static Document reconstitute(DocumentRegistration registration, DocumentTypeCode documentType,
-			DocumentStatus status, Instant createdAt, Instant updatedAt, UUID previousDocumentId,
-			String cancellationReason, Instant cancelledAt) {
+										DocumentStatus status, Instant createdAt, Instant updatedAt,
+										UUID previousDocumentId, String cancellationReason, Instant cancelledAt) {
 
 		Objects.requireNonNull(registration, "registration");
 		Objects.requireNonNull(documentType, "documentType");
@@ -165,7 +166,7 @@ public final class Document {
 	}
 
 	private static void checkLicenseCategory(DocumentTypeRules rules, OwnerRef owner,
-			LicenseCategory licenseCategory) {
+											 LicenseCategory licenseCategory) {
 		if (owner.ownerType() == OwnerType.DRIVER && licenseCategory == null) {
 			throw new BusinessRuleViolationException("license_category es obligatoria para el tipo " + rules.code());
 		}
@@ -190,6 +191,7 @@ public final class Document {
 	/**
 	 * Conflicto por un segundo documento activo del mismo tipo para el propietario (ADR-DOC-11). Lo usan la
 	 * validación del servicio de aplicación y la traducción del índice único, para que ambos respondan igual.
+	 *
 	 * @param documentType tipo del documento que se intenta registrar
 	 */
 	public static DomainConflictException activeDocumentConflict(DocumentTypeCode documentType) {
@@ -256,10 +258,16 @@ public final class Document {
 		return this.updatedAt;
 	}
 
-	public UUID previousDocumentId() { return this.previousDocumentId; }
+	public UUID previousDocumentId() {
+		return this.previousDocumentId;
+	}
 
-	public String cancellationReason() { return this.cancellationReason; }
+	public String cancellationReason() {
+		return this.cancellationReason;
+	}
 
-	public Instant cancelledAt() { return this.cancelledAt; }
+	public Instant cancelledAt() {
+		return this.cancelledAt;
+	}
 
 }

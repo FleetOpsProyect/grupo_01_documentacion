@@ -2,12 +2,17 @@
  * Adaptador de entrada de mensajería: consumidor de réplicas (HU-DOC-10, DAS sec. 8.2).
  *
  * <p>Dos {@link co.edu.univalle.fleetops.document.service.infrastructure.adapter.in.messaging.SqsOwnerEventConsumer}
- * idempotentes, uno por cola propia: {@code fleetops_document_driver_events_queue}, suscrita a
- * {@code fleetops_driver_events} con el Message Attribute {@code event_type} en {@code driver_activated_event}
- * (confirmado por Conductores el 08-11-2026) y {@code driver_deactivated_event} (SUPUESTO); y
- * {@code fleetops_document_vehicle_events_queue}, suscrita a {@code fleetops_vehicle_events} con
- * {@code vehicle_created_event} y {@code vehicle_decommissioned_event} (los tres, SUPUESTOS por confirmar con
- * Vehículos). Ambos traducen el sobre con
+ * idempotentes, uno por cola propia:
+ * <ul>
+ * <li>{@code fleetops_document_driver_events_queue}, suscrita a {@code fleetops_driver_events} con FilterPolicy sobre
+ * el Message Attribute {@code event_type}: {@code driver_activated_event} (confirmado por Conductores el 08-11-2026)
+ * y {@code driver_deactivated_event} (SUPUESTO).</li>
+ * <li>{@code fleetops_document_vehicle_events_queue}, suscrita a {@code fleetops_vehicle_events} con FilterPolicy
+ * sobre el Message Attribute {@code event_type}: {@code vehicle_created_event} y {@code vehicle_deleted_event},
+ * confirmados por Vehículos el 15-11-2026.</li>
+ * </ul>
+ * Ningún filtro usa el cuerpo del mensaje. El tipo de evento lo decide el Message Attribute; el cuerpo se lee tal
+ * como lo publica cada productor (versión final). Ambos traducen el mensaje con
  * {@link co.edu.univalle.fleetops.document.service.infrastructure.adapter.in.messaging.OwnerEventMessageMapper}
  * (Anti-Corruption Layer) e invocan {@code SyncOwnerReplicaUseCase}. Borran el mensaje solo tras procesarlo; los
  * inválidos o fallidos vuelven a la cola y, con la redrive policy (maxReceiveCount = 3), pasan a su DLQ

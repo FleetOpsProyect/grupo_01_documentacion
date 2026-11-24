@@ -11,7 +11,7 @@ public enum OwnerReplicaAction {
 	ACTIVATE,
 
 	/**
-	 * driver_deactivated_event o vehicle_decommissioned_event: deja de aceptar documentos nuevos; sus documentos
+	 * driver_deactivated_event o vehicle_deleted_event: deja de aceptar documentos nuevos; sus documentos
 	 * se conservan.
 	 */
 	DEACTIVATE

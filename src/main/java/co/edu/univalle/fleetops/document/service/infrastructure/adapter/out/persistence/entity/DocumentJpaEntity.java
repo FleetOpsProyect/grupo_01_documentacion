@@ -155,4 +155,12 @@ public class DocumentJpaEntity {
 		return this.updatedAt;
 	}
 
+	/**
+	 * Guarda el estado calculado con la regla única (ADR-DOC-01). @Version incrementa la versión al confirmar.
+	 */
+	public void changeStatus(String newStatus, Instant changedAt) {
+		this.status = newStatus;
+		this.updatedAt = changedAt;
+	}
+
 }

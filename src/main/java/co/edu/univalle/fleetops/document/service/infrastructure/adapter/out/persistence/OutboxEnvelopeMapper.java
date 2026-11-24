@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpired;
+import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpiringSoon;
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentRegistered;
 import co.edu.univalle.fleetops.document.service.domain.event.DomainEvent;
 import co.edu.univalle.fleetops.document.service.infrastructure.config.TimestampFormat;
@@ -44,6 +45,7 @@ final class OutboxEnvelopeMapper {
 		return switch (event) {
 			case DocumentRegistered registered -> "document_registered_event";
 			case DocumentExpired expired -> "document_expired_event";
+			case DocumentExpiringSoon expiringSoon -> "document_expiring_soon_event";
 		};
 	}
 
@@ -82,6 +84,14 @@ final class OutboxEnvelopeMapper {
 				data.put("owner_type", expired.owner().ownerType().name());
 				data.put("owner_id", expired.owner().ownerId().toString());
 				data.put("expiration_date", expired.expirationDate().toString());
+			}
+			case DocumentExpiringSoon expiringSoon -> {
+				data.put("document_type", expiringSoon.documentType().name());
+				data.put("owner_type", expiringSoon.owner().ownerType().name());
+				data.put("owner_id", expiringSoon.owner().ownerId().toString());
+				data.put("expiration_date", expiringSoon.expirationDate().toString());
+				data.put("threshold_days", expiringSoon.thresholdDays());
+				data.put("days_remaining", expiringSoon.daysRemaining());
 			}
 		}
 		return data;

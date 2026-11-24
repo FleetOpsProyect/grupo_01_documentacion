@@ -27,6 +27,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import co.edu.univalle.fleetops.document.service.domain.exception.BusinessRuleViolationException;
 import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflictException;
 import co.edu.univalle.fleetops.document.service.domain.exception.ResourceNotFoundException;
+import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceParameterException;
 
 /**
  * Traduce las excepciones a Problem Details (RFC 9457) siguiendo las convenciones del DAS sec. 7: 400 para
@@ -55,6 +56,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(ResourceNotFoundException.class)
 	ProblemDetail handleNotFound(ResourceNotFoundException ex) {
 		return problem(HttpStatus.NOT_FOUND, "Recurso no encontrado", ex.getMessage());
+	}
+
+	@ExceptionHandler(ComplianceParameterException.class)
+	ProblemDetail handleComplianceParameter(ComplianceParameterException ex) {
+		return problem(HttpStatus.BAD_REQUEST, "Parámetro inválido", ex.getMessage());
 	}
 
 	/**
