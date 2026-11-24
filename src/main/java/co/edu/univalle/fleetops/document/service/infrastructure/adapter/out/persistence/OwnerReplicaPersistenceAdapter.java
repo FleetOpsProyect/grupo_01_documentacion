@@ -48,6 +48,14 @@ public class OwnerReplicaPersistenceAdapter implements OwnerReplicaRepository {
 	}
 
 	@Override
+	public boolean existsOwner(OwnerRef owner) {
+		return switch (owner.ownerType()) {
+			case VEHICLE -> this.entityManager.find(VehicleReplicaJpaEntity.class, owner.ownerId()) != null;
+			case DRIVER -> this.entityManager.find(DriverReplicaJpaEntity.class, owner.ownerId()) != null;
+		};
+	}
+
+	@Override
 	public Optional<Instant> lastEventAt(OwnerRef owner) {
 		return switch (owner.ownerType()) {
 			case VEHICLE -> lockVehicle(owner).map(VehicleReplicaJpaEntity::getLastEventAt);

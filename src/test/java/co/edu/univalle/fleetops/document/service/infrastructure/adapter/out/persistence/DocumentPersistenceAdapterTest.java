@@ -15,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import co.edu.univalle.fleetops.document.service.application.port.out.DocumentRepository;
 import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflictException;
 import co.edu.univalle.fleetops.document.service.domain.model.Document;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentNumber;
@@ -65,6 +66,27 @@ class DocumentPersistenceAdapterTest {
 		// Assert (DAS sec. 6.3, v0.4: un documento anulado libera su número)
 		verify(this.repository).existsByDocumentTypeAndDocumentNumberAndStatusIn("SOAT", "AT-1",
 				List.of("VALID", "EXPIRING_SOON", "EXPIRED", "REPLACED"));
+	}
+
+	@Test
+	void should_return_active_document_snapshots_for_compliance() {
+		// Arrange
+		UUID documentId = UUID.fromString("019a2f4e-8b1c-7d2a-9e3f-1a2b3c4d5e6f");
+		LocalDate expirationDate = LocalDate.of(2027, 9, 30);
+		Instant timestamp = Instant.parse("2026-10-26T15:04:05Z");
+		DocumentJpaEntity entity = new DocumentJpaEntity(documentId, "SOAT", "VEHICLE", VEHICLE.ownerId(),
+				"AT-1", "Seguros Demo S.A.", LocalDate.of(2026, 10, 1), expirationDate, "VALID", null,
+				timestamp, timestamp);
+		given(this.repository.findByOwnerTypeAndOwnerIdAndStatusIn("VEHICLE", VEHICLE.ownerId(),
+				List.of("VALID", "EXPIRING_SOON", "EXPIRED"))).willReturn(List.of(entity));
+
+		// Act
+		List<DocumentRepository.ComplianceDocumentSnapshot> snapshots =
+			this.adapter.findComplianceDocuments(VEHICLE);
+
+		// Assert
+		assertThat(snapshots).containsExactly(
+				new DocumentRepository.ComplianceDocumentSnapshot(documentId, DocumentTypeCode.SOAT, expirationDate));
 	}
 
 	@Test

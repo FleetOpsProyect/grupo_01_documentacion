@@ -67,6 +67,20 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 		}
 	}
 
+	@Override
+	public List<ComplianceDocumentSnapshot> findComplianceDocuments(OwnerRef owner) {
+		List<String> activeStatuses = Arrays.stream(DocumentStatus.values())
+			.filter(DocumentStatus::isActive)
+			.map(Enum::name)
+			.toList();
+		return this.repository.findByOwnerTypeAndOwnerIdAndStatusIn(owner.ownerType().name(),
+				owner.ownerId(), activeStatuses)
+			.stream()
+			.map(entity -> new ComplianceDocumentSnapshot(entity.getDocumentId(),
+					DocumentTypeCode.valueOf(entity.getDocumentType()), entity.getExpirationDate()))
+			.toList();
+	}
+
 	private static RuntimeException translate(DataIntegrityViolationException ex, Document document) {
 		String constraint = constraintName(ex);
 		if (UK_TYPE_NUMBER.equals(constraint)) {
