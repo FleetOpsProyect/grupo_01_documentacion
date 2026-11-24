@@ -25,8 +25,8 @@ final class DocumentRestMapper {
 	static DocumentResponse toResponse(DocumentView view) {
 		return new DocumentResponse(view.documentId(), view.documentType(), view.ownerType(), view.ownerId(),
 				view.documentNumber(), view.issuingEntity(), view.issueDate(), view.expirationDate(),
-				view.licenseCategory(), view.status(), view.daysRemaining(), null, null, null, view.createdAt(),
-				view.updatedAt());
+				view.licenseCategory(), view.status(), view.daysRemaining(), view.previousDocumentId(),
+				view.cancellationReason(), view.cancelledAt(), view.createdAt(), view.updatedAt());
 	}
 
 }

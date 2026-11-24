@@ -2,6 +2,8 @@ package co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.per
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -65,6 +67,12 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 		catch (DataIntegrityViolationException ex) {
 			throw translate(ex, document);
 		}
+	}
+
+	@Override
+	public Optional<Document> findById(UUID documentId) {
+		return this.repository.findById(documentId)
+				.map(DocumentPersistenceMapper::toDomain);
 	}
 
 	private static RuntimeException translate(DataIntegrityViolationException ex, Document document) {

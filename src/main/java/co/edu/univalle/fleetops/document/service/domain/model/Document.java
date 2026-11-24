@@ -46,6 +46,12 @@ public final class Document {
 
 	private final Instant updatedAt;
 
+	private final UUID previousDocumentId;
+
+	private final String cancellationReason;
+
+	private final Instant cancelledAt;
+
 	private final List<DomainEvent> domainEvents = new ArrayList<>();
 
 	private Document(DocumentRegistration registration, DocumentTypeCode documentType, String issuingEntity,
@@ -60,6 +66,27 @@ public final class Document {
 		this.status = status;
 		this.createdAt = now;
 		this.updatedAt = now;
+		this.previousDocumentId = null;
+		this.cancellationReason = null;
+		this.cancelledAt = null;
+	}
+
+	private Document(DocumentRegistration registration, DocumentTypeCode documentType, String issuingEntity,
+			DocumentStatus status, Instant createdAt, Instant updatedAt, UUID previousDocumentId,
+			String cancellationReason, Instant cancelledAt) {
+		this.id = registration.documentId();
+		this.documentType = documentType;
+		this.owner = registration.owner();
+		this.documentNumber = registration.documentNumber();
+		this.issuingEntity = issuingEntity;
+		this.validity = registration.validity();
+		this.licenseCategory = registration.licenseCategory();
+		this.status = status;
+		this.createdAt = Objects.requireNonNull(createdAt, "createdAt");
+		this.updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
+		this.previousDocumentId = previousDocumentId;
+		this.cancellationReason = cancellationReason;
+		this.cancelledAt = cancelledAt;
 	}
 
 	/**
@@ -93,6 +120,26 @@ public final class Document {
 					document.validity.expirationDate(), now));
 		}
 		return document;
+	}
+
+	public static Document reconstitute(DocumentRegistration registration, DocumentTypeCode documentType,
+			DocumentStatus status, Instant createdAt, Instant updatedAt, UUID previousDocumentId,
+			String cancellationReason, Instant cancelledAt) {
+
+		Objects.requireNonNull(registration, "registration");
+		Objects.requireNonNull(documentType, "documentType");
+		Objects.requireNonNull(status, "status");
+
+		return new Document(
+				registration,
+				documentType,
+				registration.issuingEntity(),
+				status,
+				createdAt,
+				updatedAt,
+				previousDocumentId,
+				cancellationReason,
+				cancelledAt);
 	}
 
 	private static void checkTypeIsActive(DocumentTypeRules rules) {
@@ -208,5 +255,11 @@ public final class Document {
 	public Instant updatedAt() {
 		return this.updatedAt;
 	}
+
+	public UUID previousDocumentId() { return this.previousDocumentId; }
+
+	public String cancellationReason() { return this.cancellationReason; }
+
+	public Instant cancelledAt() { return this.cancelledAt; }
 
 }

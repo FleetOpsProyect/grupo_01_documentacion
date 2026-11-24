@@ -3,6 +3,7 @@ package co.edu.univalle.fleetops.document.service.infrastructure.adapter.in.rest
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
@@ -99,6 +100,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@Override
 	protected ResponseEntity<Object> handleTypeMismatch(TypeMismatchException ex, HttpHeaders headers,
 			HttpStatusCode status, WebRequest request) {
+		if ("id".equals(ex.getPropertyName())
+				&& UUID.class.equals(ex.getRequiredType())) {
+
+			ProblemDetail body = problem(
+					HttpStatus.BAD_REQUEST,
+					"Parámetro inválido",
+					"El identificador debe ser un UUID válido");
+
+			return ResponseEntity.badRequest()
+					.headers(headers)
+					.body(body);
+		}
 		ProblemDetail body = problem(HttpStatus.BAD_REQUEST, "Parámetro inválido",
 				"El parámetro '" + ex.getPropertyName() + "' tiene un formato inválido.");
 		return ResponseEntity.badRequest().headers(headers).body(body);

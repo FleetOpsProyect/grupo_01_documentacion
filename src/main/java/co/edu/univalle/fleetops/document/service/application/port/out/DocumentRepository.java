@@ -4,6 +4,8 @@ import co.edu.univalle.fleetops.document.service.domain.model.Document;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentNumber;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Puerto de salida: persistencia de documentos (Repository).
@@ -29,4 +31,11 @@ public interface DocumentRepository {
 	 */
 	void save(Document document);
 
+	/**
+	 * Busca un documento por su identificador.
+	 * Incluye documentos REPLACED y CANCELLED.
+	 * @param documentId identificador del documento
+	 * @return documento encontrado, si existe
+	 */
+	Optional<Document> findById(UUID documentId);
 }

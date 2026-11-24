@@ -16,6 +16,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import co.edu.univalle.fleetops.document.service.application.port.in.DocumentView;
 import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentCommand;
 import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.GetDocumentUseCase;
+import co.edu.univalle.fleetops.document.service.domain.exception.ResourceNotFoundException;
 import co.edu.univalle.fleetops.document.service.domain.exception.BusinessRuleViolationException;
 import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflictException;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
@@ -31,6 +33,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -57,6 +60,9 @@ class DocumentControllerTest {
 
 	@MockitoBean
 	private RegisterDocumentUseCase registerDocument;
+
+	@MockitoBean
+	private GetDocumentUseCase getDocument;
 
 	@Test
 	void should_respond_201_with_location_snake_case_body_and_correlation_id() throws Exception {
@@ -179,11 +185,60 @@ class DocumentControllerTest {
 			.andExpect(jsonPath("$.detail").value("expiration_date es obligatoria para el tipo SOAT"));
 	}
 
+	@Test
+	void should_respond_200_when_document_exists() throws Exception {
+		// Arrange
+		given(this.getDocument.getById(DOCUMENT_ID))
+				.willReturn(soatView());
+
+		// Act + Assert
+		this.mockMvc.perform(get("/documents/{id}", DOCUMENT_ID))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.document_id")
+						.value(DOCUMENT_ID.toString()))
+				.andExpect(jsonPath("$.document_type").value("SOAT"))
+				.andExpect(jsonPath("$.owner_type").value("VEHICLE"))
+				.andExpect(jsonPath("$.status").value("VALID"))
+				.andExpect(jsonPath("$.days_remaining").value(339));
+
+		verify(this.getDocument).getById(DOCUMENT_ID);
+	}
+
+	@Test
+	void should_respond_404_when_document_does_not_exist() throws Exception {
+		// Arrange
+		given(this.getDocument.getById(DOCUMENT_ID))
+				.willThrow(new ResourceNotFoundException(
+						"Documento no encontrado"));
+
+		// Act + Assert
+		this.mockMvc.perform(get("/documents/{id}", DOCUMENT_ID))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.title")
+						.value("Recurso no encontrado"))
+				.andExpect(jsonPath("$.detail")
+						.value("Documento no encontrado"));
+
+		verify(this.getDocument).getById(DOCUMENT_ID);
+	}
+
+	@Test
+	void should_respond_400_when_document_id_is_not_a_uuid()
+			throws Exception {
+
+		this.mockMvc.perform(get("/documents/{id}", "uuid-invalido"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.detail")
+						.value("El identificador debe ser un UUID válido"));
+
+		verifyNoInteractions(this.getDocument);
+	}
+
 	private static DocumentView soatView() {
 		Instant now = Instant.parse("2026-10-26T15:04:05Z");
 		return new DocumentView(DOCUMENT_ID, DocumentTypeCode.SOAT, OwnerType.VEHICLE, VEHICLE_ID,
 				"AT-1300-0045-2026", "Seguros Demo S.A.", LocalDate.of(2026, 10, 1), LocalDate.of(2027, 9, 30), null,
-				DocumentStatus.VALID, 339, now, now);
+				DocumentStatus.VALID, 339, null, null, null, now, now);
 	}
 
 }

@@ -128,7 +128,8 @@ class RegisterDocumentServiceTest {
 		verify(this.outbox).append(eq(EVENT_ID), any(DocumentRegistered.class), eq(CORRELATION_ID));
 		assertThat(view).isEqualTo(new DocumentView(DOCUMENT_ID, DocumentTypeCode.SOAT, OwnerType.VEHICLE,
 				VEHICLE_ID, "AT-1300-0045-2026", "Seguros Demo S.A.", LocalDate.of(2026, 10, 1),
-				LocalDate.of(2027, 9, 30), null, DocumentStatus.VALID, 339, NOW, NOW));
+				LocalDate.of(2027, 9, 30), null, DocumentStatus.VALID,
+				339, null, null, null, NOW, NOW));
 	}
 
 	@Test

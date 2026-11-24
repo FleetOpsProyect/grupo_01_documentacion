@@ -30,7 +30,8 @@ import co.edu.univalle.fleetops.document.service.domain.service.StatusEvaluation
  */
 public record DocumentView(UUID documentId, DocumentTypeCode documentType, OwnerType ownerType, UUID ownerId,
 		String documentNumber, String issuingEntity, LocalDate issueDate, LocalDate expirationDate,
-		String licenseCategory, DocumentStatus status, Integer daysRemaining, Instant createdAt, Instant updatedAt) {
+		String licenseCategory, DocumentStatus status, Integer daysRemaining, UUID previousDocumentId,
+        String cancellationReason, Instant cancelledAt, Instant createdAt, Instant updatedAt) {
 
 	/**
 	 * @param document documento del dominio
@@ -41,7 +42,8 @@ public record DocumentView(UUID documentId, DocumentTypeCode documentType, Owner
 		return new DocumentView(document.id(), document.documentType(), document.owner().ownerType(),
 				document.owner().ownerId(), document.documentNumber().value(), document.issuingEntity(),
 				document.validity().issueDate(), document.validity().expirationDate(), licenseCategory,
-				evaluation.status(), evaluation.daysRemaining(), document.createdAt(), document.updatedAt());
+				evaluation.status(), evaluation.daysRemaining(), document.previousDocumentId(),
+				document.cancellationReason(), document.cancelledAt(), document.createdAt(), document.updatedAt());
 	}
 
 }
