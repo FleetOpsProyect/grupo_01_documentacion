@@ -2,7 +2,7 @@
 
 Microservicio de FleetOps que controla la vigencia del SOAT, la revisión tecnomecánica y la licencia de conducción, verifica que cada vehículo tenga su tarjeta de propiedad y emite alertas **antes** de que un documento venza. Sigue una **arquitectura hexagonal (puertos y adaptadores)**: el núcleo (`domain` y `application`) no conoce Spring, JPA ni AWS, y se comunica con el exterior solo mediante puertos que implementan los adaptadores de `infrastructure`. Tiene base de datos PostgreSQL propia, no llama por HTTP a otros servicios y publica sus eventos con el patrón Outbox hacia AWS SNS + SQS (DAS, secciones 3, 5 y 8).
 
-> **Estado de esta versión:** implementa **HU-DOC-01, HU-DOC-02 y HU-DOC-10**. `POST /documents` registra el SOAT, la revisión tecnomecánica y la tarjeta de propiedad de un vehículo, o la licencia de conducción de un conductor, con sus fechas de vigencia; cada registro guarda el documento, su auditoría y sus eventos en el outbox en una sola transacción. Las réplicas de vehículos y conductores se alimentan con los eventos de esos servicios por **AWS SNS + SQS** (HU-DOC-10), según el perfil de Spring: `local` usa un emulador de AWS en Docker (Moto, en [`infra/local-aws`](infra/local-aws)) y `aws` usa AWS real. Sin perfil, el servicio arranca sin AWS, como antes. Los eventos propios todavía quedan en `outbox_events` (PENDING): falta el publicador.
+> **Estado de esta versión:** implementa **HU-DOC-01, HU-DOC-02, HU-DOC-06, HU-DOC-09 y HU-DOC-10**. El job de vigencia (HU-DOC-06) corre a la 01:00 hora de Bogotá y al arrancar: marca EXPIRING\_SOON y guarda `document_expiring_soon_event` en el outbox al alcanzar cada umbral de `ALERT_THRESHOLD_DAYS`. `POST /documents` registra el SOAT, la revisión tecnomecánica y la tarjeta de propiedad de un vehículo, o la licencia de conducción de un conductor, con sus fechas de vigencia; cada registro guarda el documento, su auditoría y sus eventos en el outbox en una sola transacción. Las réplicas de vehículos y conductores se alimentan con los eventos de esos servicios por **AWS SNS + SQS** (HU-DOC-10), según el perfil de Spring: `local` usa un emulador de AWS en Docker (Moto, en [`infra/local-aws`](infra/local-aws)) y `aws` usa AWS real. Sin perfil, el servicio arranca sin AWS, como antes. Los eventos propios todavía quedan en `outbox_events` (PENDING): falta el publicador.
 >
 > Referencias: [`context/G01_DAS_Documentos.md`](context/G01_DAS_Documentos.md) (DAS G01 v0.7) y [`docs/G01_Endpoints_Documentacion.xlsx`](docs/G01_Endpoints_Documentacion.xlsx) (contrato de endpoints y hoja «Eventos SNS» con los payloads).
 
@@ -147,6 +147,8 @@ Para ejecutar todas las pruebas:
 | Unitarias de adaptadores | UUIDv7, correlación por MDC, sobre del outbox sin `document_number`, traducción de restricciones únicas a 409 | Nada |
 | Integración (`DocumentRegistrationIT`) | Flujo REST → PostgreSQL 18.6 real con los scripts de `database/`, `ddl-auto: validate`, outbox, auditoría, 409 y 422 | Docker (si no está disponible, la clase se omite) |
 | Unitarias de mensajería | Traducción del sobre (campos desconocidos, -05:00, mensajes inválidos), consumidor SQS con el cliente simulado (borrado solo tras procesar, reintento si SQS cae), validación de `MessagingProperties` | Nada |
+| Unitarias del job de vigencia | `AlertThresholdPolicy` (ADR-DOC-03), `CheckExpirationsService` y `EvaluateDocumentExpirationService` con los puertos simulados, adaptadores de `issued_alerts` y `scheduled_job_runs` (incluida la retoma de una ejecución caída), planificador y configuración | Nada |
+| Integración (`ExpirationCheckIT`) | HU-DOC-06 contra PostgreSQL real: estado, auditoría, outbox con event\_id determinista, `issued_alerts`, segunda pasada sin eventos, umbral menor tras una caída, exclusiones y retoma de una ejecución fallida. Con `FLEETOPS_PERFORMANCE_TESTS=true` mide 10.000 documentos (criterio 1) | Docker |
 | Integración (`OwnerReplicaSyncIT`) | HU-DOC-10: SNS → SQS (raw delivery y FilterPolicy) → réplica en PostgreSQL → `POST /documents`; repetidos, antiguos, bajas (422) y mensaje inválido a la DLQ tras 3 recepciones, con Moto | Docker |
 
 Todas siguen el patrón AAA (Arrange → Act → Assert).
@@ -206,7 +208,8 @@ El workflow [`.github/workflows/ci-sonar.yml`](.github/workflows/ci-sonar.yml) e
         │                                      CorrelationIdFilter, GlobalExceptionHandler (RFC 9457)
         ├── adapter/in/messaging/            ✔ SqsOwnerEventConsumer (una cola por productor),
         │                                      OwnerEventMessageMapper (Anti-Corruption Layer)
-        ├── adapter/in/scheduler/            Job de vigencia 01:00 hora de Bogotá (HU-DOC-06/07) · vacío
+        ├── adapter/in/scheduler/            ✔ ExpirationCheckScheduler: 01:00 hora de Bogotá y al arrancar
+        │                                      (HU-DOC-06; HU-DOC-07 pendiente)
         ├── adapter/out/persistence/         ✔ Entidades y repositorios JPA, adaptadores, sobre del outbox
         ├── adapter/out/messaging/           Publicador SNS del outbox · vacío: este arquetipo no usa AWS
         ├── adapter/out/clock/               ✔ ZonedBusinessClock (America/Bogota)
@@ -343,7 +346,7 @@ Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` 
 - Solo HU-DOC-01 y HU-DOC-02. `Location` apunta a `GET /documents/{id}`, pero ese endpoint (HU-DOC-03) todavía no existe y responde 404.
 - Los eventos propios quedan en `outbox_events` como PENDING: el publicador SNS del outbox todavía no existe.
 - Vehículos confirmó sus eventos el 15-11-2026: Message Attribute `vehicle_created_event` y `vehicle_deleted_event`. Sus cuerpos son la versión final: el del alta lleva `event_type` `VEHICLE_CREATED`, el instante en `timestamp` y no trae `source`; el consumidor toma el tipo del Message Attribute. `driver_deactivated_event` sigue siendo un SUPUESTO (P-04).
-- Al eliminar un vehículo, sus documentos se conservan pero ya no requieren seguimiento: el job de vigencia (HU-DOC-06/07), cuando exista, debe omitir los documentos de propietarios inactivos.
+- Al eliminar un vehículo, sus documentos se conservan pero ya no requieren seguimiento: el job de vigencia (HU-DOC-06/07), cuando exista, los omite (HU-DOC-06).
 - Una baja que llega antes que el alta de la misma entidad se registra como procesada sin efecto (no hay fila que desactivar); si después llega el alta, la entidad queda activa. Se resuelve cuando los productores garanticen el orden o publiquen el estado completo.
 - `docker-compose.yml` monta `database/document_seed_dev.sql` también en el servidor (`deploy.yml` usa el mismo compose). Con las réplicas ya alimentadas por eventos, conviene sacar la semilla del compose de producción.
 - Sin migraciones: los scripts de `database/` solo corren cuando el volumen de PostgreSQL está vacío. Un cambio de esquema exige recrear la base.
@@ -361,6 +364,6 @@ Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` 
 **Próximos pasos sugeridos** (orden del DAS sec. 13)
 1. HU-DOC-03: `GET /documents/{id}` y `GET /documents` (con el rango de vencimiento).
 2. Publicador SNS del outbox (`adapter/out/messaging`), con el mismo emulador y los mismos perfiles.
-3. HU-DOC-06/07 (job de vigencia), HU-DOC-05 (renovación), HU-DOC-04 (corrección y anulación), HU-DOC-08/09 y `validity-check`.
+3. HU-DOC-07 (paso a EXPIRED en el mismo job), HU-DOC-05 (renovación), HU-DOC-04 (corrección y anulación), HU-DOC-08/09 y `validity-check`.
 4. Migraciones versionadas del esquema cuando se estabilice.
 5. Pipeline CI/CD y OpenAPI en `fleetops-contracts` (HU-DOC-11).

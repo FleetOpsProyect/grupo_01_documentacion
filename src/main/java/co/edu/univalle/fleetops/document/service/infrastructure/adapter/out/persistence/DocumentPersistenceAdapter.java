@@ -1,9 +1,12 @@
 package co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence;
 
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
@@ -14,6 +17,8 @@ import co.edu.univalle.fleetops.document.service.domain.model.DocumentNumber;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
+import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
+import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.entity.DocumentJpaEntity;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.repository.DocumentJpaRepository;
 
 /**
@@ -81,8 +86,39 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 			.toList();
 	}
 
+	@Override
+	public List<UUID> findExpirationCandidateIds(LocalDate today, LocalDate alertHorizon) {
+		return this.repository.findExpirationCandidateIds(today, alertHorizon);
+	}
+
+	@Override
+	public Optional<ExpirationCandidate> lockExpirationCandidate(UUID documentId) {
+		return this.repository.findForUpdate(documentId)
+			.filter(DocumentPersistenceAdapter::isExpirationCandidate)
+			.map(DocumentPersistenceAdapter::toExpirationCandidate);
+	}
+
+	@Override
+	public void updateStatus(UUID documentId, DocumentStatus status, Instant updatedAt) {
+		DocumentJpaEntity entity = this.repository.findById(documentId)
+			.orElseThrow(() -> new IllegalStateException("El documento " + documentId + " no existe"));
+		entity.changeStatus(status.name(), updatedAt);
+	}
+
+	private static boolean isExpirationCandidate(DocumentJpaEntity entity) {
+		DocumentStatus status = DocumentStatus.valueOf(entity.getStatus());
+		return entity.getExpirationDate() != null
+				&& (status == DocumentStatus.VALID || status == DocumentStatus.EXPIRING_SOON);
+	}
+
+	private static ExpirationCandidate toExpirationCandidate(DocumentJpaEntity entity) {
+		return new ExpirationCandidate(entity.getDocumentId(), DocumentTypeCode.valueOf(entity.getDocumentType()),
+				new OwnerRef(OwnerType.valueOf(entity.getOwnerType()), entity.getOwnerId()),
+				entity.getExpirationDate(), DocumentStatus.valueOf(entity.getStatus()));
+	}
+
 	private static RuntimeException translate(DataIntegrityViolationException ex, Document document) {
-		String constraint = constraintName(ex);
+		String constraint = ConstraintViolations.constraintName(ex);
 		if (UK_TYPE_NUMBER.equals(constraint)) {
 			return new DomainConflictException(
 					"Ya existe un documento " + document.documentType() + " no anulado con ese document_number");
@@ -91,15 +127,6 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 			return Document.activeDocumentConflict(document.documentType());
 		}
 		return ex;
-	}
-
-	private static String constraintName(Throwable ex) {
-		for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
-			if (cause instanceof ConstraintViolationException violation) {
-				return violation.getConstraintName();
-			}
-		}
-		return null;
 	}
 
 }

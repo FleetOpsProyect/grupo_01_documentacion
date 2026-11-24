@@ -9,6 +9,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpired;
+import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpiringSoon;
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentRegistered;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
@@ -104,6 +105,27 @@ class OutboxEnvelopeMapperTest {
 		assertThat(data(envelope)).containsExactly(Map.entry("document_id", DOCUMENT_ID.toString()),
 				Map.entry("document_type", "SOAT"), Map.entry("owner_type", "VEHICLE"),
 				Map.entry("owner_id", VEHICLE.ownerId().toString()), Map.entry("expiration_date", "2026-10-20"));
+	}
+
+	@Test
+	void should_build_the_envelope_of_document_expiring_soon_with_the_threshold() {
+		// Arrange (HU-DOC-06, hoja «Eventos SNS»)
+		DocumentExpiringSoon event = new DocumentExpiringSoon(DOCUMENT_ID, DocumentTypeCode.SOAT, VEHICLE,
+				LocalDate.of(2026, 11, 25), 30, 30, NOW);
+
+		// Act
+		Map<String, Object> envelope = OutboxEnvelopeMapper.envelope(EVENT_ID, event, CORRELATION_ID, BOGOTA);
+
+		// Assert
+		assertThat(OutboxEnvelopeMapper.eventTypeOf(event)).isEqualTo("document_expiring_soon_event");
+		assertThat(envelope).containsEntry("event_type", "document_expiring_soon_event")
+			.containsEntry("source", "document")
+			.containsEntry("occurred_at", "2026-10-26T10:04:05-05:00")
+			.containsEntry("correlation_id", CORRELATION_ID.toString());
+		assertThat(data(envelope)).containsExactly(Map.entry("document_id", DOCUMENT_ID.toString()),
+				Map.entry("document_type", "SOAT"), Map.entry("owner_type", "VEHICLE"),
+				Map.entry("owner_id", VEHICLE.ownerId().toString()), Map.entry("expiration_date", "2026-11-25"),
+				Map.entry("threshold_days", 30), Map.entry("days_remaining", 30));
 	}
 
 	@Test

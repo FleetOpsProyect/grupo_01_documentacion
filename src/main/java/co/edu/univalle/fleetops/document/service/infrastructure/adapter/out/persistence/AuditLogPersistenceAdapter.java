@@ -1,5 +1,6 @@
 package co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -12,6 +13,7 @@ import tools.jackson.databind.json.JsonMapper;
 import co.edu.univalle.fleetops.document.service.application.port.out.AuditLogRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.IdGenerator;
 import co.edu.univalle.fleetops.document.service.domain.model.Document;
+import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.entity.DocumentAuditLogJpaEntity;
 
 /**
@@ -23,6 +25,10 @@ import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.pers
 public class AuditLogPersistenceAdapter implements AuditLogRepository {
 
 	static final String ACTION_REGISTERED = "REGISTERED";
+
+	static final String ACTION_STATUS_CHANGED = "STATUS_CHANGED";
+
+	private static final String STATUS = "status";
 
 	private final EntityManager entityManager;
 
@@ -44,6 +50,16 @@ public class AuditLogPersistenceAdapter implements AuditLogRepository {
 		this.entityManager.persist(new DocumentAuditLogJpaEntity(this.idGenerator.newId(), document.id(),
 				ACTION_REGISTERED, this.jsonMapper.writeValueAsString(changes), null, correlationId,
 				document.createdAt()));
+	}
+
+	@Override
+	public void recordStatusChange(UUID documentId, DocumentStatus previous, DocumentStatus current,
+			UUID correlationId, Instant changedAt) {
+		Map<String, Object> changes = new LinkedHashMap<>();
+		changes.put("before", Map.of(STATUS, previous.name()));
+		changes.put("after", Map.of(STATUS, current.name()));
+		this.entityManager.persist(new DocumentAuditLogJpaEntity(this.idGenerator.newId(), documentId,
+				ACTION_STATUS_CHANGED, this.jsonMapper.writeValueAsString(changes), null, correlationId, changedAt));
 	}
 
 	private static Map<String, Object> snapshot(Document document) {

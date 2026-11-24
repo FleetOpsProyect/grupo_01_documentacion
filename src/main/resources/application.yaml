@@ -69,6 +69,13 @@ fleetops:
     business-time-zone: ${BUSINESS_TIME_ZONE}
     # Umbrales de alerta en días, validados al arrancar (ADR-DOC-09)
     alert-threshold-days: ${ALERT_THRESHOLD_DAYS}
+    # Job de vigencia (HU-DOC-06, ADR-DOC-02). Valores del DAS, no del ambiente: no requiere variables nuevas
+    expiration-job:
+      enabled: true
+      # Todos los días a la 01:00, evaluado en BUSINESS_TIME_ZONE (06:00 UTC); además corre al arrancar
+      cron: "0 0 1 * * *"
+      # Una ejecución que sigue en RUNNING después de este tiempo se considera abandonada y otra instancia la retoma
+      stale-after: 30m
   # Mensajería AWS SNS + SQS (HU-DOC-10, ADR-DOC-12, ADR-DOC-14). Apagada sin perfil: el servicio arranca sin AWS.
   # La activan los perfiles local (emulador Moto, infra/local-aws) y aws (AWS real); ver application-*.yaml
   messaging:
