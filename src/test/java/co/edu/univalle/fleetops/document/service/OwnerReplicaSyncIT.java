@@ -119,7 +119,7 @@ class OwnerReplicaSyncIT {
 		driverTopic = provisionConsumer("fleetops_driver_events", DRIVER_QUEUE, DRIVER_DLQ,
 				"driver_activated_event", "driver_deactivated_event");
 		vehicleTopic = provisionConsumer("fleetops_vehicle_events", VEHICLE_QUEUE, VEHICLE_DLQ,
-				"vehicle_created_event", "vehicle_decommissioned_event");
+				"vehicle_created_event", "vehicle_deleted_event");
 	}
 
 	private static String endpoint() {
@@ -137,7 +137,8 @@ class OwnerReplicaSyncIT {
 		sns.subscribe(b -> b.topicArn(topicArn)
 			.protocol("sqs")
 			.endpoint(queueArn(queueUrl))
-			.attributes(Map.of("RawMessageDelivery", "true", "FilterPolicy", filter)));
+			.attributes(Map.of("RawMessageDelivery", "true", "FilterPolicyScope", "MessageAttributes", "FilterPolicy",
+					filter)));
 		return topicArn;
 	}
 
@@ -232,27 +233,53 @@ class OwnerReplicaSyncIT {
 			.isTrue();
 	}
 
+	/**
+	 * Cuerpo definitivo del alta de Vehículos (event_type VEHICLE_CREATED en el cuerpo, timestamp, sin source),
+	 * publicado con el Message Attribute event_type = vehicle_created_event. Después se registra el SOAT.
+	 */
 	@Test
-	void should_create_the_vehicle_replica() {
+	void should_create_the_vehicle_replica_from_the_vehicles_team_sample() throws Exception {
 		// Arrange
 		UUID vehicle = UUID.randomUUID();
 
 		// Act
-		publish(vehicleTopic, "vehicle_created_event", """
-				{"event_id": "%s", "event_type": "vehicle_created_event", "occurred_at": "2026-11-08T09:00:00-05:00",
-				 "source": "vehicle", "correlation_id": "%s",
-				 "data": {"vehicle_id": "%s", "license_plate": "JKL012"}}
-				""".formatted(UUID.randomUUID(), UUID.randomUUID(), vehicle));
+		publish(vehicleTopic, "vehicle_created_event",
+				vehicleCreated(UUID.randomUUID(), vehicle, "2026-11-08T14:43:00Z"));
 
 		// Assert
 		await().atMost(TIMEOUT).untilAsserted(() -> assertThat(this.jdbc.queryForList(
 				"SELECT license_plate, is_active, last_event_at FROM document.vehicle_replica WHERE vehicle_id = ?",
 				vehicle))
 			.singleElement()
-			.satisfies(row -> {
-				assertThat(row).containsEntry("license_plate", "JKL012").containsEntry("is_active", true);
-				assertThat(row.get("last_event_at").toString()).isNotBlank();
-			}));
+			.satisfies(row -> assertThat(row).containsEntry("license_plate", "ABC-123")
+				.containsEntry("is_active", true)));
+		this.mockMvc.perform(post("/documents").contentType(MediaType.APPLICATION_JSON).content(soat(vehicle)))
+			.andExpect(status().isCreated());
+	}
+
+	@Test
+	void should_deactivate_a_deleted_vehicle_and_reject_new_documents_with_422() throws Exception {
+		// Arrange
+		UUID vehicle = UUID.randomUUID();
+		publish(vehicleTopic, "vehicle_created_event",
+				vehicleCreated(UUID.randomUUID(), vehicle, "2026-11-08T14:43:00Z"));
+		await().atMost(TIMEOUT)
+			.until(() -> this.jdbc.queryForList("SELECT is_active FROM document.vehicle_replica WHERE vehicle_id = ?",
+					Boolean.class, vehicle), rows -> rows.equals(List.of(true)));
+
+		// Act: ejemplo de vehicle_deleted_event de Vehículos (15-11-2026)
+		publish(vehicleTopic, "vehicle_deleted_event", """
+				{"event_id": "%s", "event_type": "vehicle_deleted_event", "occurred_at": "2026-11-08T10:30:00-05:00",
+				 "source": "vehicle", "correlation_id": "%s",
+				 "data": {"vehicle_id": "%s", "plate": "ABC123", "deleted_at": "2026-11-08T10:30:00-05:00",
+				          "version_number": 9}}""".formatted(UUID.randomUUID(), UUID.randomUUID(), vehicle));
+
+		// Assert
+		await().atMost(TIMEOUT)
+			.until(() -> this.jdbc.queryForList("SELECT is_active FROM document.vehicle_replica WHERE vehicle_id = ?",
+					Boolean.class, vehicle), rows -> rows.equals(List.of(false)));
+		this.mockMvc.perform(post("/documents").contentType(MediaType.APPLICATION_JSON).content(soat(vehicle)))
+			.andExpect(status().isUnprocessableContent());
 	}
 
 	@Test
@@ -272,6 +299,46 @@ class OwnerReplicaSyncIT {
 			assertThat(messages).extracting(Message::body).contains(body);
 			messages.forEach(m -> sqs.deleteMessage(d -> d.queueUrl(dlqUrl).receiptHandle(m.receiptHandle())));
 		});
+	}
+
+	/**
+	 * La suscripción filtra por el Message Attribute: un mensaje sin él no llega a la cola, aunque su cuerpo sea un
+	 * evento válido.
+	 */
+	@Test
+	void should_filter_out_a_message_without_the_event_type_attribute() {
+		// Arrange
+		UUID vehicle = UUID.randomUUID();
+
+		// Act
+		publishWithoutAttributes(vehicleTopic, vehicleCreated(UUID.randomUUID(), vehicle, "2026-11-08T14:43:00Z"));
+
+		// Assert
+		await().during(Duration.ofSeconds(3))
+			.atMost(Duration.ofSeconds(5))
+			.until(() -> this.jdbc.queryForObject("SELECT count(*) FROM document.vehicle_replica WHERE vehicle_id = ?",
+					Integer.class, vehicle) == 0);
+	}
+
+	private static void publishWithoutAttributes(String topicArn, String body) {
+		sns.publish(b -> b.topicArn(topicArn).message(body));
+	}
+
+	private static String vehicleCreated(UUID eventId, UUID vehicle, String timestamp) {
+		return """
+				{"event_id": "%s", "event_type": "VEHICLE_CREATED", "timestamp": "%s",
+				 "data": {"vehicle_id": "%s", "plate": "ABC-123", "vehicle_type": "Camion", "brand": "Chevrolet",
+				          "model": "NHR", "year": 2022, "color": "Blanco", "notes": "En perfecto estado operacional",
+				          "odometer_km": 45000, "status": "Activo"}}""".formatted(eventId, timestamp, vehicle);
+	}
+
+	private static String soat(UUID vehicle) {
+		return """
+				{ "document_type": "SOAT", "owner_type": "VEHICLE", "owner_id": "%s",
+				  "document_number": "SOAT-%s", "issuing_entity": "Aseguradora de prueba",
+				  "issue_date": "%s", "expiration_date": "%s" }
+				""".formatted(vehicle, UUID.randomUUID().toString().substring(0, 18), TODAY.minusMonths(1),
+				TODAY.plusMonths(11));
 	}
 
 	private static void publish(String topicArn, String eventType, String body) {

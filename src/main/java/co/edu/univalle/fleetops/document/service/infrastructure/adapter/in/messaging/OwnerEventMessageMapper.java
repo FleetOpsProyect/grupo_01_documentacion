@@ -17,16 +17,24 @@ import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
 
 /**
- * Anti-Corruption Layer: traduce el cuerpo de un mensaje SQS (sobre de FleetOps, con raw message delivery) a un
- * {@link OwnerReplicaEvent} (HU-DOC-10, DAS sec. 8.2).
+ * Anti-Corruption Layer: traduce un mensaje SQS (raw message delivery) a un {@link OwnerReplicaEvent} (HU-DOC-10,
+ * DAS sec. 8.2).
  *
- * <p>Sobre: {@code event_id}, {@code event_type}, {@code occurred_at}, {@code source}, {@code correlation_id} y
- * {@code data}. Ignora los campos desconocidos del sobre y de {@code data} (criterio 5). {@code occurred_at} se
- * acepta con cualquier desfase ISO 8601 (Bogotá, -05:00, por P-02) y se compara como instante (criterio 4).
- *
- * <p>Eventos soportados: {@code driver_activated_event} (confirmado por Conductores) y
- * {@code driver_deactivated_event}, {@code vehicle_created_event} y {@code vehicle_decommissioned_event}
- * (SUPUESTOS, DAS sec. 8.2). Cualquier otro mensaje es inválido.
+ * <p>El tipo de evento lo decide el Message Attribute {@code event_type}, el mismo por el que filtran las
+ * suscripciones (ADR-DOC-14). El {@code event_type} del cuerpo no se usa: en el alta de vehículos vale
+ * {@code VEHICLE_CREATED} y el atributo, {@code vehicle_created_event}. Los cuerpos de Vehículos y Conductores son el
+ * contrato definitivo de esos equipos (decisión del 15-11-2026):
+ * <ul>
+ * <li>{@code driver_activated_event} (confirmado) y {@code driver_deactivated_event} (SUPUESTO): {@code occurred_at},
+ * {@code source}, {@code correlation_id} y {@code data.driver_id} / {@code data.full_name}.</li>
+ * <li>{@code vehicle_created_event}: el instante llega en {@code timestamp} (UTC) y no trae {@code source} ni
+ * {@code correlation_id}; la placa llega en {@code data.plate}.</li>
+ * <li>{@code vehicle_deleted_event}: {@code occurred_at}, {@code source}, {@code correlation_id} y
+ * {@code data.vehicle_id}.</li>
+ * </ul>
+ * Si falta {@code source}, se usa el slug del productor ({@code vehicle} o {@code driver}). Ignora los campos
+ * desconocidos del sobre y de {@code data} (criterio 5). El instante se acepta con cualquier desfase ISO 8601 y se
+ * compara como instante (criterio 4). Cualquier otro mensaje es inválido.
  */
 public final class OwnerEventMessageMapper {
 
@@ -36,17 +44,25 @@ public final class OwnerEventMessageMapper {
 
 	static final int MAX_SOURCE_LENGTH = 150;
 
+	private static final String DRIVER_SOURCE = "driver";
+
+	private static final String VEHICLE_SOURCE = "vehicle";
+
+	private static final String OCCURRED_AT = "occurred_at";
+
 	private static final Map<String, SupportedEvent> SUPPORTED_EVENTS = Map.of(
 			"driver_activated_event",
-			new SupportedEvent(OwnerType.DRIVER, OwnerReplicaAction.ACTIVATE, "driver_id", "full_name",
-					MAX_FULL_NAME_LENGTH),
+			new SupportedEvent(OwnerType.DRIVER, OwnerReplicaAction.ACTIVATE, DRIVER_SOURCE, OCCURRED_AT, "driver_id",
+					"full_name", MAX_FULL_NAME_LENGTH),
 			"driver_deactivated_event",
-			new SupportedEvent(OwnerType.DRIVER, OwnerReplicaAction.DEACTIVATE, "driver_id", null, 0),
+			new SupportedEvent(OwnerType.DRIVER, OwnerReplicaAction.DEACTIVATE, DRIVER_SOURCE, OCCURRED_AT,
+					"driver_id", null, 0),
 			"vehicle_created_event",
-			new SupportedEvent(OwnerType.VEHICLE, OwnerReplicaAction.ACTIVATE, "vehicle_id", "license_plate",
-					MAX_LICENSE_PLATE_LENGTH),
-			"vehicle_decommissioned_event",
-			new SupportedEvent(OwnerType.VEHICLE, OwnerReplicaAction.DEACTIVATE, "vehicle_id", null, 0));
+			new SupportedEvent(OwnerType.VEHICLE, OwnerReplicaAction.ACTIVATE, VEHICLE_SOURCE, "timestamp",
+					"vehicle_id", "plate", MAX_LICENSE_PLATE_LENGTH),
+			"vehicle_deleted_event",
+			new SupportedEvent(OwnerType.VEHICLE, OwnerReplicaAction.DEACTIVATE, VEHICLE_SOURCE, OCCURRED_AT,
+					"vehicle_id", null, 0));
 
 	private final JsonMapper jsonMapper;
 
@@ -55,20 +71,23 @@ public final class OwnerEventMessageMapper {
 	}
 
 	/**
-	 * @throws InvalidOwnerEventMessageException si el cuerpo no es un evento de réplica válido
+	 * @param eventType valor del Message Attribute {@code event_type}, o {@code null} si el mensaje no lo trae
+	 * @param body cuerpo del mensaje
+	 * @throws InvalidOwnerEventMessageException si el mensaje no es un evento de réplica válido
 	 */
-	public OwnerEventMessage map(String body) {
+	public OwnerEventMessage map(String eventType, String body) {
 		JsonNode envelope = parse(body);
 		String rawEventId = text(envelope, "event_id");
 		UUID eventId = uuid(rawEventId, "event_id", rawEventId);
 
-		String eventType = text(envelope, "event_type");
 		SupportedEvent supported = eventType == null ? null : SUPPORTED_EVENTS.get(eventType);
 		if (supported == null) {
-			throw new InvalidOwnerEventMessageException("event_type no soportado: " + eventType, rawEventId);
+			throw new InvalidOwnerEventMessageException(
+					"Message Attribute event_type ausente o no soportado: " + eventType, rawEventId);
 		}
-		String source = boundedText(envelope, "source", MAX_SOURCE_LENGTH, rawEventId);
-		Instant occurredAt = instant(text(envelope, "occurred_at"), rawEventId);
+		String source = source(envelope, supported, rawEventId);
+		Instant occurredAt = instant(text(envelope, supported.occurredAtField()), supported.occurredAtField(),
+				rawEventId);
 
 		JsonNode data = envelope.path("data");
 		if (!data.isObject()) {
@@ -117,15 +136,23 @@ public final class OwnerEventMessageMapper {
 		}
 	}
 
-	private static Instant instant(String value, String rawEventId) {
+	private static String source(JsonNode envelope, SupportedEvent supported, String rawEventId) {
+		String value = text(envelope, "source");
+		if (value == null || value.isBlank()) {
+			return supported.defaultSource();
+		}
+		return boundedText(envelope, "source", MAX_SOURCE_LENGTH, rawEventId);
+	}
+
+	private static Instant instant(String value, String field, String rawEventId) {
 		if (value == null) {
-			throw new InvalidOwnerEventMessageException("occurred_at es obligatorio", rawEventId);
+			throw new InvalidOwnerEventMessageException(field + " es obligatorio", rawEventId);
 		}
 		try {
 			return OffsetDateTime.parse(value).toInstant();
 		}
 		catch (DateTimeParseException ex) {
-			throw new InvalidOwnerEventMessageException("occurred_at no es una fecha y hora ISO 8601 con desfase",
+			throw new InvalidOwnerEventMessageException(field + " no es una fecha y hora ISO 8601 con desfase",
 					rawEventId, ex);
 		}
 	}
@@ -156,8 +183,8 @@ public final class OwnerEventMessageMapper {
 		}
 	}
 
-	private record SupportedEvent(OwnerType ownerType, OwnerReplicaAction action, String idField, String labelField,
-			int maxLabelLength) {
+	private record SupportedEvent(OwnerType ownerType, OwnerReplicaAction action, String defaultSource,
+			String occurredAtField, String idField, String labelField, int maxLabelLength) {
 	}
 
 }

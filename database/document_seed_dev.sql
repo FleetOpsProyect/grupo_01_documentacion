@@ -3,7 +3,7 @@
 -- Datos semilla de DESARROLLO para las réplicas de propietarios (schema "document")
 --
 -- Fuente: DAS G01, ADR-DOC-12 y ADR-DOC-14. Desde HU-DOC-10 las réplicas las alimenta el consumidor SQS de
--- fleetops_driver_events (confirmado) y fleetops_vehicle_events (SUPUESTO: por confirmar con Vehículos).
+-- fleetops_driver_events (confirmado) y fleetops_vehicle_events (eventos confirmados por Vehículos el 15-11-2026).
 -- Esta semilla queda para desarrollar sin mensajería (sin perfil de Spring) y para las pruebas manuales.
 --
 -- NUNCA ejecutar en producción: estos propietarios no existen en Vehículos ni en Conductores.

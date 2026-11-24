@@ -90,7 +90,7 @@ public record MessagingProperties(boolean enabled, String region, String endpoin
 
 	/**
 	 * @param driverEvents cola suscrita a {@code fleetops_driver_events}
-	 * @param vehicleEvents cola suscrita a {@code fleetops_vehicle_events} (SUPUESTO)
+	 * @param vehicleEvents cola suscrita a {@code fleetops_vehicle_events}
 	 */
 	public record Queues(String driverEvents, String vehicleEvents) {
 
