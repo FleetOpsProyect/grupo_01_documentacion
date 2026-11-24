@@ -102,9 +102,6 @@ tasks.named('jacocoTestReport') {
 		xml.required = true
 		html.required = true
 	}
-	classDirectories.setFrom(files(classDirectories.files.collect {
-		fileTree(dir: it, includes: coreClasses)
-	}))
 }
 
 tasks.named('jacocoTestCoverageVerification') {
