@@ -14,6 +14,7 @@ import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceU
 import co.edu.univalle.fleetops.document.service.application.port.in.ValidityCheckUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.out.EligibleOwnerRepository;
 import co.edu.univalle.fleetops.document.service.application.port.in.EvaluateDocumentExpirationUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.ExpiringSoonUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.SyncOwnerReplicaUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.out.AuditLogRepository;
@@ -31,6 +32,7 @@ import co.edu.univalle.fleetops.document.service.application.service.CheckExpira
 import co.edu.univalle.fleetops.document.service.application.service.ComplianceService;
 import co.edu.univalle.fleetops.document.service.application.service.ValidityCheckService;
 import co.edu.univalle.fleetops.document.service.application.service.EvaluateDocumentExpirationService;
+import co.edu.univalle.fleetops.document.service.application.service.ExpiringSoonService;
 import co.edu.univalle.fleetops.document.service.application.service.RegisterDocumentService;
 import co.edu.univalle.fleetops.document.service.application.service.SyncOwnerReplicaService;
 import co.edu.univalle.fleetops.document.service.domain.service.AlertThresholdPolicy;
@@ -146,6 +148,15 @@ public class CoreConfiguration {
 			EvaluateDocumentExpirationUseCase evaluator, BusinessClock businessClock,
 			AlertThresholdPolicy alertPolicy) {
 		return new CheckExpirationsService(jobRuns, documents, evaluator, businessClock, alertPolicy);
+	}
+
+	/**
+	 * HU-DOC-08: documentos próximos a vencer. No necesita transacción porque solo lee.
+	 */
+	@Bean
+	ExpiringSoonUseCase expiringSoonUseCase(DocumentRepository documents, BusinessClock businessClock,
+			DocumentStatusCalculator statusCalculator) {
+		return new ExpiringSoonService(documents, businessClock, statusCalculator);
 	}
 
 }

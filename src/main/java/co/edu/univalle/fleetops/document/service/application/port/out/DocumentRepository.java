@@ -7,11 +7,14 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
+import co.edu.univalle.fleetops.document.service.application.port.in.PageQuery;
+import co.edu.univalle.fleetops.document.service.application.port.in.PageResult;
 import co.edu.univalle.fleetops.document.service.domain.model.Document;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentNumber;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
+import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
 
 /**
  * Puerto de salida: persistencia de documentos (Repository).
@@ -83,6 +86,26 @@ public interface DocumentRepository {
 			Objects.requireNonNull(status, "status");
 		}
 
+	}
+
+	/**
+	 * Documentos activos que vencen entre {@code from} y {@code to}, ambos incluidos, ordenados por fecha de
+	 * vencimiento (HU-DOC-08). Incluye la placa o el nombre del propietario.
+	 *
+	 * @param documentType filtro por tipo; null si no se filtra
+	 * @param ownerType filtro por tipo de propietario; null si no se filtra
+	 */
+	PageResult<ExpiringDocumentSnapshot> findExpiringBetween(LocalDate from, LocalDate to,
+			DocumentTypeCode documentType, OwnerType ownerType, PageQuery pageQuery);
+
+	/**
+	 * Datos de un documento próximo a vencer, tal como salen de la base de datos.
+	 *
+	 * @param licensePlate placa del vehículo; null en conductores o si la réplica no la tiene
+	 * @param fullName nombre del conductor; null en vehículos o si la réplica no lo tiene
+	 */
+	record ExpiringDocumentSnapshot(UUID documentId, DocumentTypeCode documentType, OwnerType ownerType,
+			UUID ownerId, String documentNumber, LocalDate expirationDate, String licensePlate, String fullName) {
 	}
 
 }
