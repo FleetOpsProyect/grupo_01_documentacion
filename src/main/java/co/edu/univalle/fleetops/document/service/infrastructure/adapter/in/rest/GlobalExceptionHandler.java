@@ -27,6 +27,7 @@ import co.edu.univalle.fleetops.document.service.domain.exception.BusinessRuleVi
 import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflictException;
 import co.edu.univalle.fleetops.document.service.domain.exception.ResourceNotFoundException;
 import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceParameterException;
+import co.edu.univalle.fleetops.document.service.application.port.in.InvalidQueryParameterException;
 
 /**
  * Traduce las excepciones a Problem Details (RFC 9457) siguiendo las convenciones del DAS sec. 7: 400 para
@@ -59,6 +60,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
 	@ExceptionHandler(ComplianceParameterException.class)
 	ProblemDetail handleComplianceParameter(ComplianceParameterException ex) {
+		return problem(HttpStatus.BAD_REQUEST, "Parámetro inválido", ex.getMessage());
+	}
+
+	@ExceptionHandler(InvalidQueryParameterException.class)
+	ProblemDetail handleInvalidQueryParameter(InvalidQueryParameterException ex) {
 		return problem(HttpStatus.BAD_REQUEST, "Parámetro inválido", ex.getMessage());
 	}
 

@@ -8,6 +8,8 @@ import java.util.UUID;
 
 import jakarta.persistence.LockModeType;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -51,5 +53,64 @@ public interface DocumentJpaRepository extends JpaRepository<DocumentJpaEntity, 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("SELECT d FROM DocumentJpaEntity d WHERE d.documentId = :documentId")
 	Optional<DocumentJpaEntity> findForUpdate(@Param("documentId") UUID documentId);
+
+	/**
+	 * Documentos próximos a vencer (HU-DOC-08), con la placa o el nombre de la réplica.
+	 *
+	 * <ul>
+	 * <li>Busca por fecha, no por el estado guardado. {@code statuses} solo sirve para descartar REPLACED y
+	 * CANCELLED.</li>
+	 * <li>Si un filtro llega null, no se aplica.</li>
+	 * <li>Se ordena también por document_id para que las páginas no cambien entre consultas cuando varios documentos
+	 * vencen el mismo día.</li>
+	 * </ul>
+	 */
+	@Query(value = """
+			SELECT d.documentId AS documentId, d.documentType AS documentType, d.ownerType AS ownerType,
+			       d.ownerId AS ownerId, d.documentNumber AS documentNumber, d.expirationDate AS expirationDate,
+			       v.licensePlate AS licensePlate, r.fullName AS fullName
+			FROM DocumentJpaEntity d
+			LEFT JOIN VehicleReplicaJpaEntity v ON d.ownerType = 'VEHICLE' AND v.vehicleId = d.ownerId
+			LEFT JOIN DriverReplicaJpaEntity r ON d.ownerType = 'DRIVER' AND r.driverId = d.ownerId
+			WHERE d.status IN :statuses
+			  AND d.expirationDate IS NOT NULL
+			  AND d.expirationDate BETWEEN :from AND :to
+			  AND (:documentType IS NULL OR d.documentType = :documentType)
+			  AND (:ownerType IS NULL OR d.ownerType = :ownerType)
+			ORDER BY d.expirationDate, d.documentId""",
+			countQuery = """
+			SELECT COUNT(d) FROM DocumentJpaEntity d
+			WHERE d.status IN :statuses
+			  AND d.expirationDate IS NOT NULL
+			  AND d.expirationDate BETWEEN :from AND :to
+			  AND (:documentType IS NULL OR d.documentType = :documentType)
+			  AND (:ownerType IS NULL OR d.ownerType = :ownerType)""")
+	Page<ExpiringDocumentRow> findExpiringBetween(@Param("statuses") Collection<String> statuses,
+			@Param("from") LocalDate from, @Param("to") LocalDate to,
+			@Param("documentType") String documentType, @Param("ownerType") String ownerType, Pageable pageable);
+
+	/**
+	 * Fila que devuelve {@link #findExpiringBetween}. Spring llena cada método con la columna del mismo alias en la
+	 * consulta (por ejemplo, {@code AS licensePlate} llena {@code getLicensePlate()}).
+	 */
+	interface ExpiringDocumentRow {
+
+		UUID getDocumentId();
+
+		String getDocumentType();
+
+		String getOwnerType();
+
+		UUID getOwnerId();
+
+		String getDocumentNumber();
+
+		LocalDate getExpirationDate();
+
+		String getLicensePlate();
+
+		String getFullName();
+
+	}
 
 }
