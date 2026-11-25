@@ -3,7 +3,10 @@
 # varias veces y deja el mismo resultado; también corrige recursos que ya existían con otros atributos.
 #
 # Crea:
-#   - Tópico propio fleetops_document_events (lo usará el publicador del outbox).
+#   - Tópico propio fleetops_document_events, donde publica el publicador del outbox. Imprime su ARN: es el valor de
+#     MESSAGING_DOCUMENT_TOPIC_ARN.
+#   - Solo con PROVISION_DEBUG_QUEUE=true (emulador): la cola fleetops_document_events_debug_queue, suscrita al tópico
+#     propio sin filtro, para ver lo que publica el servicio. No se crea en AWS real.
 #   - Por cada productor (Conductores y Vehículos): una cola propia, su DLQ con redrive policy de 3 recepciones,
 #     la política de la cola que solo deja escribir al tópico del productor y la suscripción con raw message
 #     delivery y FilterPolicy sobre el Message Attribute event_type (ADR-DOC-14). Nunca se filtra por el cuerpo.
@@ -12,6 +15,7 @@
 #   AWS_REGION                       región (obligatoria)
 #   SQS_VISIBILITY_TIMEOUT_SECONDS   visibility timeout de las colas (obligatoria)
 #   AWS_ENDPOINT_URL                 solo con el emulador; vacía contra AWS real
+#   PROVISION_DEBUG_QUEUE            true para crear la cola de depuración del tópico propio (por defecto, false)
 #   DRIVER_TOPIC_ARN, VEHICLE_TOPIC_ARN
 #                                    ARN de los tópicos de los productores. Si están vacías, el script crea el tópico
 #                                    por nombre en esta cuenta (emulador). En AWS real, use los ARN que entreguen
@@ -143,7 +147,20 @@ provision_consumer() {
 }
 
 echo "Provisionando mensajería de Documentación en $AWS_REGION ${AWS_ENDPOINT_URL:+(emulador $AWS_ENDPOINT_URL)}"
-echo "  Tópico propio: $(create_topic fleetops_document_events)"
+DOCUMENT_TOPIC_ARN="$(create_topic fleetops_document_events)"
+echo "  Tópico propio (MESSAGING_DOCUMENT_TOPIC_ARN): $DOCUMENT_TOPIC_ARN"
+
+# Cola de depuración del emulador: recibe todo lo que publica el servicio, con raw message delivery y sin filtro
+if [[ "${PROVISION_DEBUG_QUEUE:-false}" == "true" ]]; then
+	debug_url="$(aws sqs create-queue --queue-name fleetops_document_events_debug_queue --query QueueUrl --output text)"
+	debug_arn="$(queue_arn "$debug_url")"
+	allow_topic "$debug_url" "$debug_arn" "$DOCUMENT_TOPIC_ARN"
+	existing="$(aws sns list-subscriptions-by-topic --topic-arn "$DOCUMENT_TOPIC_ARN" 		--query "Subscriptions[?Endpoint=='$debug_arn'].SubscriptionArn | [0]" --output text)"
+	if [[ -z "$existing" || "$existing" == "None" ]]; then
+		aws sns subscribe --topic-arn "$DOCUMENT_TOPIC_ARN" --protocol sqs --notification-endpoint "$debug_arn" 			--attributes RawMessageDelivery=true >/dev/null
+	fi
+	echo "  Cola de depuración: fleetops_document_events_debug_queue <- $DOCUMENT_TOPIC_ARN (sin filtro)"
+fi
 
 # Conductores: driver_activated_event confirmado (08-11-2026); driver_deactivated_event SUPUESTO (pendiente P-04)
 provision_consumer "${DRIVER_TOPIC_ARN:-fleetops_driver_events}" \

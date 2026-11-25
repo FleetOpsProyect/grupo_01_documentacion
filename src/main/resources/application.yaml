@@ -91,3 +91,16 @@ fleetops:
     queues:
       driver-events: fleetops_document_driver_events_queue
       vehicle-events: fleetops_document_vehicle_events_queue
+    # Publicador del outbox en el tópico propio (ADR-DOC-05; decisiones D-2, D-3 y D-8 del 24-11-2026)
+    publisher:
+      # Permite apagar la publicación sin apagar los consumidores
+      enabled: true
+      # ARN de fleetops_document_events en la región del proyecto
+      topic-arn: ${MESSAGING_DOCUMENT_TOPIC_ARN}
+      # Eventos por lote; un lote se publica en una transacción
+      batch-size: 50
+      # Espera entre ciclos y antes de reintentar un error transitorio (sin espera creciente). Un commit que guarda
+      # eventos despierta al publicador antes
+      poll-interval: 2s
+      # Tiempo máximo de una publicación en SNS, incluidos los reintentos del SDK
+      call-timeout: 10s

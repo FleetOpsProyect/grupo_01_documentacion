@@ -9,8 +9,12 @@ import java.util.UUID;
 
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
+import co.edu.univalle.fleetops.document.service.application.port.in.PageQuery;
+import co.edu.univalle.fleetops.document.service.application.port.in.PageResult;
 import co.edu.univalle.fleetops.document.service.application.port.out.DocumentRepository;
 import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflictException;
 import co.edu.univalle.fleetops.document.service.domain.model.Document;
@@ -21,6 +25,7 @@ import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.entity.DocumentJpaEntity;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.repository.DocumentJpaRepository;
+import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.repository.DocumentJpaRepository.ExpiringDocumentRow;
 
 /**
  * Adaptador de {@link DocumentRepository} sobre JPA.
@@ -110,6 +115,26 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 		DocumentJpaEntity entity = this.repository.findById(documentId)
 			.orElseThrow(() -> new IllegalStateException("El documento " + documentId + " no existe"));
 		entity.changeStatus(status.name(), updatedAt);
+	}
+
+	@Override
+	public PageResult<ExpiringDocumentSnapshot> findExpiringBetween(LocalDate from, LocalDate to,
+			DocumentTypeCode documentType, OwnerType ownerType, PageQuery pageQuery) {
+		Page<ExpiringDocumentRow> rows = this.repository.findExpiringBetween(ACTIVE_STATUSES, from, to,
+				(documentType != null) ? documentType.name() : null, (ownerType != null) ? ownerType.name() : null,
+				PageRequest.of(pageQuery.page(), pageQuery.size()));
+		List<ExpiringDocumentSnapshot> content = rows.getContent()
+			.stream()
+			.map(DocumentPersistenceAdapter::toExpiringSnapshot)
+			.toList();
+		return new PageResult<>(content, pageQuery.page(), pageQuery.size(), rows.getTotalElements(),
+				rows.getTotalPages());
+	}
+
+	private static ExpiringDocumentSnapshot toExpiringSnapshot(ExpiringDocumentRow row) {
+		return new ExpiringDocumentSnapshot(row.getDocumentId(), DocumentTypeCode.valueOf(row.getDocumentType()),
+				OwnerType.valueOf(row.getOwnerType()), row.getOwnerId(), row.getDocumentNumber(),
+				row.getExpirationDate(), row.getLicensePlate(), row.getFullName());
 	}
 
 	private static boolean isExpirationCandidate(DocumentJpaEntity entity) {

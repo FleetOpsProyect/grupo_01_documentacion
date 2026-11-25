@@ -2,7 +2,7 @@
 
 Microservicio de FleetOps que controla la vigencia del SOAT, la revisión tecnomecánica y la licencia de conducción, verifica que cada vehículo tenga su tarjeta de propiedad y emite alertas **antes** de que un documento venza. Sigue una **arquitectura hexagonal (puertos y adaptadores)**: el núcleo (`domain` y `application`) no conoce Spring, JPA ni AWS, y se comunica con el exterior solo mediante puertos que implementan los adaptadores de `infrastructure`. Tiene base de datos PostgreSQL propia, no llama por HTTP a otros servicios y publica sus eventos con el patrón Outbox hacia AWS SNS + SQS (DAS, secciones 3, 5 y 8).
 
-> **Estado de esta versión:** implementa **HU-DOC-01, HU-DOC-02, HU-DOC-06, HU-DOC-09 y HU-DOC-10**. El job de vigencia (HU-DOC-06) corre a la 01:00 hora de Bogotá y al arrancar: marca EXPIRING\_SOON y guarda `document_expiring_soon_event` en el outbox al alcanzar cada umbral de `ALERT_THRESHOLD_DAYS`. `POST /documents` registra el SOAT, la revisión tecnomecánica y la tarjeta de propiedad de un vehículo, o la licencia de conducción de un conductor, con sus fechas de vigencia; cada registro guarda el documento, su auditoría y sus eventos en el outbox en una sola transacción. Las réplicas de vehículos y conductores se alimentan con los eventos de esos servicios por **AWS SNS + SQS** (HU-DOC-10), según el perfil de Spring: `local` usa un emulador de AWS en Docker (Moto, en [`infra/local-aws`](infra/local-aws)) y `aws` usa AWS real. Sin perfil, el servicio arranca sin AWS, como antes. Los eventos propios todavía quedan en `outbox_events` (PENDING): falta el publicador.
+> **Estado de esta versión:** implementa **HU-DOC-01, HU-DOC-02, HU-DOC-06, HU-DOC-09, HU-DOC-10 y HU-DOC-12**. `GET /documents/validity-check` (HU-DOC-12) lista los vehículos o conductores con toda su documentación obligatoria vigente hasta una fecha. El job de vigencia (HU-DOC-06) corre a la 01:00 hora de Bogotá y al arrancar: marca EXPIRING\_SOON y guarda `document_expiring_soon_event` en el outbox al alcanzar cada umbral de `ALERT_THRESHOLD_DAYS`. `POST /documents` registra el SOAT, la revisión tecnomecánica y la tarjeta de propiedad de un vehículo, o la licencia de conducción de un conductor, con sus fechas de vigencia; cada registro guarda el documento, su auditoría y sus eventos en el outbox en una sola transacción. Las réplicas de vehículos y conductores se alimentan con los eventos de esos servicios por **AWS SNS + SQS** (HU-DOC-10), según el perfil de Spring: `local` usa un emulador de AWS en Docker (Moto, en [`infra/local-aws`](infra/local-aws)) y `aws` usa AWS real. Sin perfil, el servicio arranca sin AWS, como antes. Con la mensajería activa (`local` o `aws`), el publicador del outbox envía los eventos al tópico SNS `fleetops_document_events` con el Message Attribute `event_type`; sin perfil, esperan en `outbox_events` (PENDING) y se publican en orden cuando se active.
 >
 > Referencias: [`context/G01_DAS_Documentos.md`](context/G01_DAS_Documentos.md) (DAS G01 v0.7) y [`docs/G01_Endpoints_Documentacion.xlsx`](docs/G01_Endpoints_Documentacion.xlsx) (contrato de endpoints y hoja «Eventos SNS» con los payloads).
 
@@ -80,6 +80,13 @@ docker compose exec documents-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_D
 
 Cada registro deja un `document_registered_event`. Si el documento nace vencido, deja además un `document_expired_event`.
 
+Consultar qué vehículos tienen toda su documentación obligatoria vigente hasta una fecha (HU-DOC-12; ABC123 aparece
+cuando tiene SOAT, tecnomecánica y tarjeta de propiedad vigentes):
+
+```bash
+curl -s "http://localhost:8081/documents/validity-check?owner_type=VEHICLE&valid_until=2027-06-30&page=0&size=20"
+```
+
 > **Windows (Git Bash o CMD):** la consola puede convertir las tildes de los argumentos de `curl` a cp1252, y el servicio responde `400 Solicitud mal formada`. Envíe el cuerpo desde un archivo UTF-8 con `--data-binary @documento.json`, o use PowerShell (`Invoke-RestMethod`). Los ejemplos de arriba evitan las tildes por eso.
 
 Respuestas de error esperadas (todas en Problem Details, RFC 9457):
@@ -90,6 +97,8 @@ Respuestas de error esperadas (todas en Problem Details, RFC 9457):
 | Campo obligatorio ausente o con formato inválido (detalle por campo en `detalles`) | 422 |
 | Tipo que no corresponde al propietario, propietario inexistente o dado de baja, `expiration_date` ausente o no permitida, `license_category` ausente o donde no aplica | 422 |
 | `document_type` + `document_number` repetidos, o un segundo documento activo del mismo tipo para el propietario | 409 |
+| `validity-check`: falta `owner_type` o `valid_until`, formato inválido, más de 100 `owner_ids`, `page` o `size` fuera de rango | 400 |
+| `validity-check`: `valid_until` anterior a la fecha actual | 422 |
 
 Para detener: `docker compose down`. Agregue `-v` para borrar también el volumen de la base de datos.
 
@@ -149,6 +158,10 @@ Para ejecutar todas las pruebas:
 | Unitarias de mensajería | Traducción del sobre (campos desconocidos, -05:00, mensajes inválidos), consumidor SQS con el cliente simulado (borrado solo tras procesar, reintento si SQS cae), validación de `MessagingProperties` | Nada |
 | Unitarias del job de vigencia | `AlertThresholdPolicy` (ADR-DOC-03), `CheckExpirationsService` y `EvaluateDocumentExpirationService` con los puertos simulados, adaptadores de `issued_alerts` y `scheduled_job_runs` (incluida la retoma de una ejecución caída), planificador y configuración | Nada |
 | Integración (`ExpirationCheckIT`) | HU-DOC-06 contra PostgreSQL real: estado, auditoría, outbox con event\_id determinista, `issued_alerts`, segunda pasada sin eventos, umbral menor tras una caída, exclusiones y retoma de una ejecución fallida. Con `FLEETOPS_PERFORMANCE_TESTS=true` mide 10.000 documentos (criterio 1) | Docker |
+| Publicador del outbox | `PublishPendingEventsService` (orden, FAILED, corte ante error transitorio), `SnsEventPublisher` (clasificación de errores), relevo, adaptador y métricas del outbox | Nada |
+| Verificación de vigencia | `ValidityCheckService` (422, paginación, placa o nombre, orden del catálogo), validación de parámetros y `ValidityCheckController` (400 por parámetro, 422, respuesta en snake\_case) | Nada |
+| Integración (`ValidityCheckIT`) | HU-DOC-12 contra PostgreSQL real: regla de aptitud con el catálogo (vencimiento antes de la fecha, documento faltante, propietario inactivo, documento anulado), paginación, conductores, 400, 422 y solo lectura | Docker |
+| Integración (`OutboxPublicationIT`) | Registro → outbox → SNS → cola suscrita con raw delivery y `event_type`; acumulados en orden ascendente; `FOR UPDATE SKIP LOCKED` con dos publicadores; tópico inexistente (PENDING) y publicación al corregirlo, con Moto | Docker |
 | Integración (`OwnerReplicaSyncIT`) | HU-DOC-10: SNS → SQS (raw delivery y FilterPolicy) → réplica en PostgreSQL → `POST /documents`; repetidos, antiguos, bajas (422) y mensaje inválido a la DLQ tras 3 recepciones, con Moto | Docker |
 
 Todas siguen el patrón AAA (Arrange → Act → Assert).
@@ -204,14 +217,16 @@ El workflow [`.github/workflows/ci-sonar.yml`](.github/workflows/ci-sonar.yml) e
     │   │                                      BusinessClock, IdGenerator, CorrelationIdProvider
     │   └── service/                         ✔ RegisterDocumentService, SyncOwnerReplicaService
     └── infrastructure/                      ADAPTADORES
-        ├── adapter/in/rest/                 ✔ DocumentController (POST /documents), DTOs, mapper,
-        │                                      CorrelationIdFilter, GlobalExceptionHandler (RFC 9457)
+        ├── adapter/in/rest/                 ✔ DocumentController (POST /documents, GET /documents/compliance),
+        │                                      ValidityCheckController (GET /documents/validity-check), DTOs,
+        │                                      mapper, CorrelationIdFilter, GlobalExceptionHandler (RFC 9457)
         ├── adapter/in/messaging/            ✔ SqsOwnerEventConsumer (una cola por productor),
         │                                      OwnerEventMessageMapper (Anti-Corruption Layer)
         ├── adapter/in/scheduler/            ✔ ExpirationCheckScheduler: 01:00 hora de Bogotá y al arrancar
         │                                      (HU-DOC-06; HU-DOC-07 pendiente)
         ├── adapter/out/persistence/         ✔ Entidades y repositorios JPA, adaptadores, sobre del outbox
-        ├── adapter/out/messaging/           Publicador SNS del outbox · vacío: este arquetipo no usa AWS
+        ├── adapter/out/messaging/           ✔ SnsEventPublisher: publica el sobre con el Message Attribute
+        │                                      event_type en fleetops_document_events
         ├── adapter/out/clock/               ✔ ZonedBusinessClock (America/Bogota)
         ├── adapter/out/id/                  ✔ UuidV7Generator (RFC 9562)
         ├── adapter/out/observability/       ✔ MdcCorrelationIdProvider
@@ -244,13 +259,13 @@ POST /documents
 | :-- | :-- |
 | ADR-DOC-01 | El estado (VALID / EXPIRING_SOON / EXPIRED) se calcula solo por fecha y días restantes; es una regla única compartida |
 | ADR-DOC-04 / 11 | Un solo documento activo por propietario y tipo (índice único parcial en la base de datos) |
-| ADR-DOC-05 | Patrón Outbox: el evento se guarda en la misma transacción que el cambio |
+| ADR-DOC-05 | Patrón Outbox: el evento se guarda en la misma transacción que el cambio y el relevo lo publica en SNS («al menos una vez») |
 | ADR-DOC-06 | Réplicas locales de vehículos y conductores con `is_active`; sin HTTP a otros servicios |
 | ADR-DOC-07 | Una sola categoría por licencia |
 | ADR-DOC-08 | Anulación lógica; la base de datos prohíbe el borrado físico |
 | ADR-DOC-09 | Umbrales configurables por `ALERT_THRESHOLD_DAYS`, validados al arrancar |
 | ADR-DOC-10 | Las reglas por tipo de documento viven en `document_types` (Type Object) |
-| ADR-DOC-12 / 14 | Broker AWS SNS + SQS (tópico `fleetops_document_events`, Message Attribute `event_type`). Se consume desde HU-DOC-10; el publicador del outbox está pendiente |
+| ADR-DOC-12 / 14 | Broker AWS SNS + SQS (tópico `fleetops_document_events`, Message Attribute `event_type`). Se consume desde HU-DOC-10 y se publica desde el outbox |
 | ADR-DOC-13 | La fecha de negocio se calcula en America/Bogota |
 | ADR-DOC-15 | Desarrollo local con el emulador Moto (no LocalStack) y perfiles de Spring `local` / `aws` |
 
@@ -303,6 +318,12 @@ docker compose run --rm provisioner /scripts/publish.sh fleetops_vehicle_events 
 
 En Git Bash anteponga `MSYS_NO_PATHCONV=1`, para que no convierta `/scripts/...` en una ruta de Windows. Para ver un mensaje inválido llegar a la DLQ, publique `/events/invalid_event.json` en `fleetops_driver_events` con `driver_activated_event` (no trae `event_id` ni `driver_id`): tras 3 recepciones (hasta unos 90 s con `SQS_VISIBILITY_TIMEOUT_SECONDS=30`) pasa a `fleetops_document_driver_events_dlq`.
 
+Lo que publica el servicio llega a `fleetops_document_events_debug_queue` (solo en el emulador, sin filtro):
+
+```bash
+aws --endpoint-url http://localhost:4566 sqs receive-message --max-number-of-messages 10 --message-attribute-names All --queue-url http://localhost:4566/123456789012/fleetops_document_events_debug_queue
+```
+
 Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` vuelve a ejecutar la provisión. Mientras está caído, el servicio sigue respondiendo y reintenta la lectura cada `MESSAGING_RETRY_DELAY` (criterio 7).
 
 > **Por qué Moto y no LocalStack:** desde 2026 la imagen de LocalStack exige `LOCALSTACK_AUTH_TOKEN` (una cuenta de LocalStack) para arrancar. Moto es de código abierto, no pide cuenta y emula lo que usa este servicio (SNS, SQS, FilterPolicy, raw delivery, redrive a DLQ). No valida políticas de IAM ni de colas: eso solo se comprueba en AWS real. Ver ADR-DOC-15 en el DAS.
@@ -319,7 +340,7 @@ Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` 
    ```
 
    Sin `DRIVER_TOPIC_ARN` y `VEHICLE_TOPIC_ARN`, el script crea esos tópicos por nombre en su cuenta. Si los tópicos de los productores están en otra cuenta, ese equipo debe permitir la suscripción en la política de su tópico. Las colas quedan con long polling de 20 s, cifrado SSE-SQS, redrive a la DLQ con 3 recepciones y una política que solo deja escribir al tópico del productor (`aws:SourceArn`). Todas las suscripciones filtran solo por el Message Attribute `event_type` (nunca por el cuerpo): un mensaje sin ese atributo no llega a la cola. Volver a ejecutar el script actualiza las suscripciones existentes.
-3. **Permisos del servicio.** Asigne al rol de la instancia EC2 una política mínima, solo sobre las dos colas:
+3. **Permisos del servicio.** Asigne al rol de la instancia EC2 una política mínima, solo sobre las dos colas y el tópico propio:
 
    ```json
    {
@@ -332,13 +353,18 @@ Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` 
          "arn:aws:sqs:<región>:<cuenta>:fleetops_document_driver_events_queue",
          "arn:aws:sqs:<región>:<cuenta>:fleetops_document_vehicle_events_queue"
        ]
+     }, {
+       "Sid": "PublishDocumentEvents",
+       "Effect": "Allow",
+       "Action": "sns:Publish",
+       "Resource": "arn:aws:sns:<región>:<cuenta>:fleetops_document_events"
      }]
    }
    ```
 
-4. **Variables del servidor.** En `/opt/fleetops/documents/.env` agregue `SPRING_PROFILES_ACTIVE=aws`, `AWS_REGION`, `MESSAGING_WAIT_TIME_SECONDS=20`, `MESSAGING_MAX_MESSAGES=10` y `MESSAGING_RETRY_DELAY=5s`. No defina `MESSAGING_ENDPOINT` ni claves. Mientras no las agregue, el despliegue sigue sin mensajería.
+4. **Variables del servidor.** En `/opt/fleetops/documents/.env` agregue `SPRING_PROFILES_ACTIVE=aws`, `AWS_REGION`, `MESSAGING_WAIT_TIME_SECONDS=20`, `MESSAGING_MAX_MESSAGES=10`, `MESSAGING_RETRY_DELAY=5s` y `MESSAGING_DOCUMENT_TOPIC_ARN` (el ARN que imprime `provision.sh`). Al activarlo, el relevo publica en orden ascendente los eventos acumulados mientras el servicio corrió sin mensajería (decisión D-4); revise antes cuántos hay con `SELECT count(*) FROM document.outbox_events WHERE status = 'PENDING'`. No defina `MESSAGING_ENDPOINT` ni claves. Mientras no las agregue, el despliegue sigue sin mensajería.
 5. **Metadatos de la instancia.** El servicio corre en un contenedor con red bridge: para que el SDK obtenga las credenciales del rol por IMDSv2, el límite de saltos de la instancia debe ser 2 (`aws ec2 modify-instance-metadata-options --instance-id <id> --http-put-response-hop-limit 2 --http-tokens required`).
-6. **Recomendado.** Una alarma de CloudWatch cuando `ApproximateNumberOfMessagesVisible` de cada DLQ sea mayor que 0, para enterarse de los mensajes que fallan. Si la política del equipo lo pide, cambie SSE-SQS por una llave KMS administrada por el cliente (y permita a SNS usarla).
+6. **Recomendado.** Una alarma de CloudWatch cuando `ApproximateNumberOfMessagesVisible` de cada DLQ sea mayor que 0, para enterarse de los mensajes que fallan. Si la política del equipo lo pide, cambie SSE-SQS por una llave KMS administrada por el cliente (y permita a SNS usarla). Para el outbox: una alarma sobre la métrica `fleetops.outbox.oldest.pending.age` cuando se exporten las métricas, y revisar los eventos en FAILED (`SELECT event_id, last_error FROM document.outbox_events WHERE status = 'FAILED'`); para reintentarlos, volver a `PENDING`.
 
 ## 8. Limitaciones conocidas y próximos pasos
 
@@ -363,7 +389,7 @@ Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` 
 
 **Próximos pasos sugeridos** (orden del DAS sec. 13)
 1. HU-DOC-03: `GET /documents/{id}` y `GET /documents` (con el rango de vencimiento).
-2. Publicador SNS del outbox (`adapter/out/messaging`), con el mismo emulador y los mismos perfiles.
+2. Exportar las métricas del outbox (por ejemplo, a CloudWatch) y definir la retención de `outbox_events` (punto abierto 19).
 3. HU-DOC-07 (paso a EXPIRED en el mismo job), HU-DOC-05 (renovación), HU-DOC-04 (corrección y anulación), HU-DOC-08/09 y `validity-check`.
 4. Migraciones versionadas del esquema cuando se estabilice.
 5. Pipeline CI/CD y OpenAPI en `fleetops-contracts` (HU-DOC-11).
