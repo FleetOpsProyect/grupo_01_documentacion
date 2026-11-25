@@ -103,6 +103,9 @@ class OwnerReplicaSyncIT {
 		registry.add("fleetops.messaging.consumer.wait-time-seconds", () -> "1");
 		registry.add("fleetops.messaging.consumer.max-messages", () -> "10");
 		registry.add("fleetops.messaging.consumer.retry-delay", () -> "200ms");
+		// Los documentos que registra esta prueba también se publican en el tópico propio (publicador del outbox)
+		registry.add("fleetops.messaging.publisher.topic-arn",
+				() -> "arn:aws:sns:" + REGION.id() + ":123456789012:fleetops_document_events");
 	}
 
 	/**
@@ -120,6 +123,7 @@ class OwnerReplicaSyncIT {
 				"driver_activated_event", "driver_deactivated_event");
 		vehicleTopic = provisionConsumer("fleetops_vehicle_events", VEHICLE_QUEUE, VEHICLE_DLQ,
 				"vehicle_created_event", "vehicle_deleted_event");
+		sns.createTopic(b -> b.name("fleetops_document_events"));
 	}
 
 	private static String endpoint() {

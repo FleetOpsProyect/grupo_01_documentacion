@@ -80,6 +80,7 @@ services:
       MESSAGING_WAIT_TIME_SECONDS: ${MESSAGING_WAIT_TIME_SECONDS:-}
       MESSAGING_MAX_MESSAGES: ${MESSAGING_MAX_MESSAGES:-}
       MESSAGING_RETRY_DELAY: ${MESSAGING_RETRY_DELAY:-}
+      MESSAGING_DOCUMENT_TOPIC_ARN: ${MESSAGING_DOCUMENT_TOPIC_ARN:-}
     # host.docker.internal apunta a la máquina anfitriona también en Linux (en Docker Desktop ya existe)
     extra_hosts:
       - "host.docker.internal:host-gateway"

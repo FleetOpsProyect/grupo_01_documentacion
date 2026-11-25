@@ -12,14 +12,23 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 /**
- * Tabla {@code document.outbox_events} (ADR-DOC-05). Se inserta en la misma transacción que el documento; en esta
- * versión no hay publicador y las filas quedan en PENDING.
+ * Tabla {@code document.outbox_events} (ADR-DOC-05). Se inserta en PENDING en la misma transacción que el
+ * documento; el publicador la pasa a PUBLISHED o, si el broker rechaza el evento, a FAILED.
  */
 @Entity
 @Table(name = "outbox_events")
 public class OutboxEventJpaEntity {
 
 	public static final String STATUS_PENDING = "PENDING";
+
+	public static final String STATUS_PUBLISHED = "PUBLISHED";
+
+	public static final String STATUS_FAILED = "FAILED";
+
+	/**
+	 * Longitud de la columna last_error.
+	 */
+	public static final int MAX_ERROR_LENGTH = 1000;
 
 	@Id
 	@Column(name = "event_id", nullable = false, updatable = false)
@@ -122,6 +131,30 @@ public class OutboxEventJpaEntity {
 
 	public Instant getPublishedAt() {
 		return this.publishedAt;
+	}
+
+	/**
+	 * El broker aceptó el evento: cuenta el intento y guarda published_at.
+	 */
+	public void markPublished(Instant publishedAtValue) {
+		this.status = STATUS_PUBLISHED;
+		this.attempts++;
+		this.lastError = null;
+		this.publishedAt = publishedAtValue;
+	}
+
+	/**
+	 * Cuenta un intento fallido y guarda el motivo, recortado a la longitud de la columna.
+	 *
+	 * @param permanent pasa el evento a FAILED; si no, sigue en PENDING
+	 */
+	public void recordFailure(String error, boolean permanent) {
+		this.attempts++;
+		this.lastError = (error != null && error.length() > MAX_ERROR_LENGTH) ? error.substring(0, MAX_ERROR_LENGTH)
+				: error;
+		if (permanent) {
+			this.status = STATUS_FAILED;
+		}
 	}
 
 }

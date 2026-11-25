@@ -2,12 +2,14 @@ package co.edu.univalle.fleetops.document.service.infrastructure.config;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.regex.Pattern;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Propiedades de la mensajería AWS SQS (HU-DOC-10, ADR-DOC-12, ADR-DOC-14). Solo se leen con
- * {@code fleetops.messaging.enabled=true} (perfiles {@code local} y {@code aws}); se validan al arrancar.
+ * Propiedades de la mensajería AWS SNS + SQS (HU-DOC-10 y publicador del outbox; ADR-DOC-05, ADR-DOC-12,
+ * ADR-DOC-14). Solo se leen con {@code fleetops.messaging.enabled=true} (perfiles {@code local} y {@code aws}); se
+ * validan al arrancar.
  *
  * @param enabled activa los consumidores SQS
  * @param region región de AWS (AWS_REGION): la región seleccionada del proyecto
@@ -17,10 +19,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param secretAccessKey par de {@code accessKeyId}
  * @param consumer ajustes de lectura
  * @param queues nombres de las colas propias (DAS sec. 8.2)
+ * @param publisher publicador del outbox en el tópico propio
  */
 @ConfigurationProperties(prefix = "fleetops.messaging")
 public record MessagingProperties(boolean enabled, String region, String endpoint, String accessKeyId,
-		String secretAccessKey, Consumer consumer, Queues queues) {
+		String secretAccessKey, Consumer consumer, Queues queues, Publisher publisher) {
 
 	static final int MAX_WAIT_TIME_SECONDS = 20;
 
@@ -49,6 +52,9 @@ public record MessagingProperties(boolean enabled, String region, String endpoin
 		}
 		if (queues == null) {
 			throw new IllegalArgumentException("fleetops.messaging.queues es obligatorio");
+		}
+		if (publisher == null) {
+			throw new IllegalArgumentException("fleetops.messaging.publisher es obligatorio");
 		}
 	}
 
@@ -98,6 +104,47 @@ public record MessagingProperties(boolean enabled, String region, String endpoin
 			if (driverEvents == null || driverEvents.isBlank() || vehicleEvents == null || vehicleEvents.isBlank()) {
 				throw new IllegalArgumentException("Los nombres de las colas de mensajería son obligatorios");
 			}
+		}
+
+	}
+
+	/**
+	 * Publicador del outbox (ADR-DOC-05; decisiones D-2, D-3 y D-8 del 24-11-2026).
+	 *
+	 * @param enabled activa el relevo del outbox; permite apagarlo sin apagar los consumidores
+	 * @param topicArn ARN del tópico fleetops_document_events (MESSAGING_DOCUMENT_TOPIC_ARN), en la región del proyecto
+	 * @param batchSize eventos por lote, de 1 a 500 (recomendado 50)
+	 * @param pollInterval espera entre ciclos y antes de reintentar un error transitorio (recomendado 2 s)
+	 * @param callTimeout tiempo máximo de una publicación en SNS, incluidos los reintentos del SDK
+	 */
+	public record Publisher(boolean enabled, String topicArn, int batchSize, Duration pollInterval,
+			Duration callTimeout) {
+
+		static final int MAX_BATCH_SIZE = 500;
+
+		private static final Pattern TOPIC_ARN = Pattern
+			.compile("^arn:aws[a-z-]*:sns:[a-z0-9-]+:\\d{12}:[A-Za-z0-9_-]{1,256}$");
+
+		public Publisher {
+			topicArn = blankToNull(topicArn);
+			if (topicArn == null || !TOPIC_ARN.matcher(topicArn).matches()) {
+				throw new IllegalArgumentException(
+						"MESSAGING_DOCUMENT_TOPIC_ARN debe ser el ARN de un tópico SNS: " + topicArn);
+			}
+			if (batchSize < 1 || batchSize > MAX_BATCH_SIZE) {
+				throw new IllegalArgumentException("fleetops.messaging.publisher.batch-size debe estar entre 1 y 500");
+			}
+			if (isNotPositive(pollInterval)) {
+				throw new IllegalArgumentException(
+						"fleetops.messaging.publisher.poll-interval debe ser mayor que cero");
+			}
+			if (isNotPositive(callTimeout)) {
+				throw new IllegalArgumentException("fleetops.messaging.publisher.call-timeout debe ser mayor que cero");
+			}
+		}
+
+		private static boolean isNotPositive(Duration duration) {
+			return duration == null || duration.isNegative() || duration.isZero();
 		}
 
 	}
