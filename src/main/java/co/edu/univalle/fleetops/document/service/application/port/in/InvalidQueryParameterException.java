@@ -1,18 +1,18 @@
 package co.edu.univalle.fleetops.document.service.application.port.in;
 
+import java.io.Serial;
+
 import co.edu.univalle.fleetops.document.service.domain.exception.DomainException;
 
 /**
- * Un parámetro de la URL es inválido. La API responde 400 con el mensaje de la excepción.
- * Se usa en las consultas con filtros y paginación (HU-DOC-03 y HU-DOC-08).
+ * Un parámetro de consulta falta, tiene formato inválido o está fuera de rango: 400 (DAS sec. 7, «Códigos»). El
+ * mensaje nombra el parámetro del contrato en snake_case.
  */
 public class InvalidQueryParameterException extends DomainException {
 
+	@Serial
 	private static final long serialVersionUID = 1L;
 
-	/**
-	 * @param message mensaje de error que verá el usuario
-	 */
 	public InvalidQueryParameterException(String message) {
 		super(message);
 	}

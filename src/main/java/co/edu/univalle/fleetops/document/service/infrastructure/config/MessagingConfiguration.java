@@ -4,22 +4,35 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProp
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.sns.SnsClientBuilder;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.SqsClientBuilder;
 import tools.jackson.databind.json.JsonMapper;
 
+import co.edu.univalle.fleetops.document.service.application.port.in.PublishPendingEventsUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.SyncOwnerReplicaUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.out.BusinessClock;
+import co.edu.univalle.fleetops.document.service.application.port.out.EventPublisher;
+import co.edu.univalle.fleetops.document.service.application.port.out.OutboxRepository;
+import co.edu.univalle.fleetops.document.service.application.service.PublishPendingEventsService;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.in.messaging.OwnerEventMessageMapper;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.in.messaging.SqsOwnerEventConsumer;
+import co.edu.univalle.fleetops.document.service.infrastructure.adapter.in.scheduler.OutboxRelay;
+import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.messaging.SnsEventPublisher;
 
 /**
- * Composition Root de la mensajería (HU-DOC-10, decisión D-2: AWS SDK v2 directo). Solo se activa con
- * {@code fleetops.messaging.enabled=true}: sin perfil, el servicio arranca sin AWS, como antes.
+ * Composition Root de la mensajería (HU-DOC-10 y publicador del outbox; AWS SDK v2 directo). Solo se activa con
+ * {@code fleetops.messaging.enabled=true}: sin perfil, el servicio arranca sin AWS y los eventos esperan en el
+ * outbox.
  *
  * <p>Perfil {@code local}: endpoint del emulador (Moto) y credenciales ficticias. Perfil {@code aws}: sin endpoint
  * y con la cadena de credenciales por defecto (rol de la instancia EC2); nunca hay claves en el repositorio.
@@ -38,6 +51,47 @@ public class MessagingConfiguration {
 			builder.endpointOverride(properties.endpointUri());
 		}
 		return builder.build();
+	}
+
+	/**
+	 * Cliente SNS del publicador. El tiempo máximo por publicación (incluidos los reintentos del SDK) acota cuánto
+	 * tiempo quedan bloqueadas las filas del lote si SNS no responde.
+	 */
+	@Bean
+	SnsClient snsClient(MessagingProperties properties) {
+		SnsClientBuilder builder = SnsClient.builder()
+			.region(Region.of(properties.region()))
+			.credentialsProvider(credentials(properties))
+			.overrideConfiguration(ClientOverrideConfiguration.builder()
+				.apiCallTimeout(properties.publisher().callTimeout())
+				.build());
+		if (properties.endpointUri() != null) {
+			builder.endpointOverride(properties.endpointUri());
+		}
+		return builder.build();
+	}
+
+	@Bean
+	EventPublisher eventPublisher(SnsClient snsClient, MessagingProperties properties) {
+		return new SnsEventPublisher(snsClient, properties.publisher().topicArn());
+	}
+
+	/**
+	 * Publicador del outbox (ADR-DOC-05): un lote por transacción (decorador).
+	 */
+	@Bean
+	PublishPendingEventsUseCase publishPendingEventsUseCase(OutboxRepository outbox, EventPublisher eventPublisher,
+			BusinessClock businessClock, MessagingProperties properties,
+			PlatformTransactionManager transactionManager) {
+		PublishPendingEventsService service = new PublishPendingEventsService(outbox, eventPublisher, businessClock,
+				properties.publisher().batchSize());
+		return new TransactionalPublishPendingEventsUseCase(service, new TransactionTemplate(transactionManager));
+	}
+
+	@Bean
+	@ConditionalOnBooleanProperty("fleetops.messaging.publisher.enabled")
+	OutboxRelay outboxRelay(PublishPendingEventsUseCase useCase, MessagingProperties properties) {
+		return new OutboxRelay(useCase, properties.publisher().pollInterval());
 	}
 
 	@Bean

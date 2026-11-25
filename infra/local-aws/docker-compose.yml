@@ -41,6 +41,8 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?Defina AWS_ACCESS_KEY_ID en infra/local-aws/.env}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?Defina AWS_SECRET_ACCESS_KEY en infra/local-aws/.env}
       SQS_VISIBILITY_TIMEOUT_SECONDS: ${SQS_VISIBILITY_TIMEOUT_SECONDS:?Defina SQS_VISIBILITY_TIMEOUT_SECONDS en infra/local-aws/.env}
+      # Cola de depuración suscrita al tópico propio, para ver lo que publica el servicio (solo en el emulador)
+      PROVISION_DEBUG_QUEUE: "true"
       AWS_PAGER: ""
     volumes:
       - ./scripts:/scripts:ro

@@ -11,6 +11,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import co.edu.univalle.fleetops.document.service.application.port.in.CheckExpirationsUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.ValidityCheckUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.out.EligibleOwnerRepository;
 import co.edu.univalle.fleetops.document.service.application.port.in.EvaluateDocumentExpirationUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.ExpiringSoonUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentUseCase;
@@ -28,6 +30,7 @@ import co.edu.univalle.fleetops.document.service.application.port.out.OwnerRepli
 import co.edu.univalle.fleetops.document.service.application.port.out.ProcessedEventRepository;
 import co.edu.univalle.fleetops.document.service.application.service.CheckExpirationsService;
 import co.edu.univalle.fleetops.document.service.application.service.ComplianceService;
+import co.edu.univalle.fleetops.document.service.application.service.ValidityCheckService;
 import co.edu.univalle.fleetops.document.service.application.service.EvaluateDocumentExpirationService;
 import co.edu.univalle.fleetops.document.service.application.service.ExpiringSoonService;
 import co.edu.univalle.fleetops.document.service.application.service.RegisterDocumentService;
@@ -52,6 +55,15 @@ public class CoreConfiguration {
 			BusinessClock businessClock, DocumentStatusCalculator statusCalculator) {
 		return new ComplianceService(owners, documents, businessClock, statusCalculator);
 	}
+
+	/**
+	 * HU-DOC-12: vigencia de la documentación obligatoria hasta una fecha. Solo lectura, sin transacción explícita.
+	 */
+	@Bean
+	ValidityCheckUseCase validityCheckUseCase(EligibleOwnerRepository eligibleOwners, BusinessClock businessClock) {
+		return new ValidityCheckService(eligibleOwners, businessClock);
+	}
+
 	@Bean
 	Clock systemClock() {
 		return Clock.systemUTC();

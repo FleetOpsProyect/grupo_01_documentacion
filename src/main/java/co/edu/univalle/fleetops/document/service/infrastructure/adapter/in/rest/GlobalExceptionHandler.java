@@ -58,13 +58,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		return problem(HttpStatus.NOT_FOUND, "Recurso no encontrado", ex.getMessage());
 	}
 
-	@ExceptionHandler(ComplianceParameterException.class)
-	ProblemDetail handleComplianceParameter(ComplianceParameterException ex) {
+	@ExceptionHandler(InvalidQueryParameterException.class)
+	ProblemDetail handleInvalidQueryParameter(InvalidQueryParameterException ex) {
 		return problem(HttpStatus.BAD_REQUEST, "Parámetro inválido", ex.getMessage());
 	}
 
-	@ExceptionHandler(InvalidQueryParameterException.class)
-	ProblemDetail handleInvalidQueryParameter(InvalidQueryParameterException ex) {
+	@ExceptionHandler(ComplianceParameterException.class)
+	ProblemDetail handleComplianceParameter(ComplianceParameterException ex) {
 		return problem(HttpStatus.BAD_REQUEST, "Parámetro inválido", ex.getMessage());
 	}
 
