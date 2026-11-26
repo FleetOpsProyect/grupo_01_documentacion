@@ -24,6 +24,11 @@ import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDoc
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentNumber;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
+import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentQuery;
+import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentsUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.PageResult;
+import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
+import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 
 /**
  * Adaptador de entrada REST de documentos (DAS sec. 7).
@@ -37,15 +42,18 @@ public class DocumentController {
 	private final RegisterDocumentUseCase registerDocument;
 	private final GetDocumentUseCase getDocument;
 	private final ComplianceUseCase compliance;
+	private final ListDocumentsUseCase listDocuments;
 
 	public DocumentController(
 			RegisterDocumentUseCase registerDocument,
 			GetDocumentUseCase getDocument,
-			ComplianceUseCase compliance) {
+			ComplianceUseCase compliance,
+			ListDocumentsUseCase listDocuments) {
 
 		this.registerDocument = registerDocument;
 		this.getDocument = getDocument;
 		this.compliance = compliance;
+		this.listDocuments = listDocuments;
 	}
 
 	@GetMapping("/compliance")
@@ -96,12 +104,45 @@ public class DocumentController {
 	 */
 	@GetMapping("/{id}")
 	public ResponseEntity<DocumentResponse> getById(
-			@PathVariable("id") UUID documentId) {
+			@PathVariable("id") String documentId) {
 
-		DocumentView view = this.getDocument.getById(documentId);
+		UUID id = QueryParameters.parseUuid(
+				documentId, "El identificador debe ser un UUID válido");
+
+		DocumentView view = this.getDocument.getById(id);
 
 		return ResponseEntity.ok(
 				DocumentRestMapper.toResponse(view));
+	}
+
+	/**
+	 * HU-DOC-03. Listado de documentos con filtros y paginación.
+	 */
+	@GetMapping
+	public ResponseEntity<PageResult<DocumentResponse>> listDocuments(
+			@RequestParam(name = "owner_type", required = false) String ownerType,
+			@RequestParam(name = "owner_id", required = false) String ownerId,
+			@RequestParam(name = "document_type", required = false) String documentType,
+			@RequestParam(name = "status", required = false) String status,
+			@RequestParam(name = "expiration_date_from", required = false) String expirationDateFrom,
+			@RequestParam(name = "expiration_date_to", required = false) String expirationDateTo,
+			@RequestParam(name = "page", required = false) String page,
+			@RequestParam(name = "size", required = false) String size) {
+
+		ListDocumentQuery query = new ListDocumentQuery(
+				QueryParameters.toEnum(ownerType, OwnerType.class, "owner_type"),
+				QueryParameters.toUuid(ownerId, "owner_id"),
+				QueryParameters.toEnum(documentType, DocumentTypeCode.class, "document_type"),
+				QueryParameters.toEnum(status, DocumentStatus.class, "status"),
+				QueryParameters.toDate(expirationDateFrom, "expiration_date_from"),
+				QueryParameters.toDate(expirationDateTo, "expiration_date_to"),
+				QueryParameters.toPageQuery(page, size));
+
+		PageResult<DocumentResponse> response = this.listDocuments
+				.listDocuments(query)
+				.map(DocumentRestMapper::toResponse);
+
+		return ResponseEntity.ok(response);
 	}
 
 }

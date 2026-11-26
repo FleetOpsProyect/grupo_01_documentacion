@@ -42,6 +42,8 @@ import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.id.U
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.observability.MdcCorrelationIdProvider;
 import co.edu.univalle.fleetops.document.service.application.port.in.GetDocumentUseCase;
 import co.edu.univalle.fleetops.document.service.application.service.GetDocumentService;
+import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentsUseCase;
+import co.edu.univalle.fleetops.document.service.application.service.ListDocumentsService;
 
 /**
  * Composition Root: cablea de forma explícita los puertos con sus adaptadores y los casos de uso con sus
@@ -115,6 +117,16 @@ public class CoreConfiguration {
 			DocumentStatusCalculator statusCalculator) {
 
 		return new GetDocumentService(documents, businessClock, statusCalculator);
+	}
+
+	/**
+	 * HU-DOC-03. Listado de documentos con filtros y paginación.
+	 */
+	@Bean
+	ListDocumentsUseCase listDocumentsUseCase(DocumentRepository documents, BusinessClock businessClock,
+			  DocumentStatusCalculator statusCalculator, AlertThresholdPolicy alertPolicy) {
+
+		return new ListDocumentsService(documents, businessClock, statusCalculator, alertPolicy);
 	}
 
 	/**

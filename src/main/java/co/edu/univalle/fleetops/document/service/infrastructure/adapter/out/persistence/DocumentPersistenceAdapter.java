@@ -26,6 +26,7 @@ import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.entity.DocumentJpaEntity;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.repository.DocumentJpaRepository;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.repository.DocumentJpaRepository.ExpiringDocumentRow;
+import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentQuery;
 
 /**
  * Adaptador de {@link DocumentRepository} sobre JPA.
@@ -82,6 +83,32 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 	public Optional<Document> findById(UUID documentId) {
 		return this.repository.findById(documentId)
 				.map(DocumentPersistenceMapper::toDomain);
+	}
+
+	@Override
+	public PageResult<Document> findDocuments(
+			ListDocumentQuery query, LocalDate today, LocalDate alertHorizon) {
+
+		PageQuery pageQuery = query.pageQuery();
+
+		Page<DocumentJpaEntity> rows = this.repository.findDocuments(
+				(query.ownerType() != null) ? query.ownerType().name() : null,
+				query.ownerId(),
+				(query.documentType() != null) ? query.documentType().name() : null,
+				(query.status() != null) ? query.status().name() : null,
+				query.expirationDateFrom(),
+				query.expirationDateTo(),
+				today,
+				alertHorizon,
+				PageRequest.of(pageQuery.page(), pageQuery.size()));
+
+		List<Document> content = rows.getContent()
+				.stream()
+				.map(DocumentPersistenceMapper::toDomain)
+				.toList();
+
+		return new PageResult<>(content, pageQuery.page(), pageQuery.size(),
+				rows.getTotalElements(), rows.getTotalPages());
 	}
 
 	@Override
