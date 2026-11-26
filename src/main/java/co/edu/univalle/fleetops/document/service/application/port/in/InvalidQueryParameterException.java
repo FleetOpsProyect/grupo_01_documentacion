@@ -17,4 +17,13 @@ public class InvalidQueryParameterException extends DomainException {
 		super(message);
 	}
 
+	/**
+	 * Error para un filtro con un valor no permitido (HU-DOC-03, criterio 3).
+	 *
+	 * @param name nombre del filtro como aparece en la URL, por ejemplo document_type
+	 */
+	public static InvalidQueryParameterException invalidFilter(String name) {
+		return new InvalidQueryParameterException("Valor de filtro no válido: " + name);
+	}
+
 }
