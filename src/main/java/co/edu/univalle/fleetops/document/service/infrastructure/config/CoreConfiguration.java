@@ -132,9 +132,9 @@ public class CoreConfiguration {
 	EvaluateDocumentExpirationUseCase evaluateDocumentExpirationUseCase(DocumentRepository documents,
 			IssuedAlertRepository issuedAlerts, AuditLogRepository auditLog, OutboxRepository outbox,
 			BusinessClock businessClock, DocumentStatusCalculator statusCalculator, AlertThresholdPolicy alertPolicy,
-			PlatformTransactionManager transactionManager) {
+			IdGenerator idGenerator, PlatformTransactionManager transactionManager) {
 		EvaluateDocumentExpirationService service = new EvaluateDocumentExpirationService(documents, issuedAlerts,
-				auditLog, outbox, businessClock, statusCalculator, alertPolicy);
+				auditLog, outbox, businessClock, statusCalculator, alertPolicy, idGenerator);
 		return new TransactionalEvaluateDocumentExpirationUseCase(service,
 				new TransactionTemplate(transactionManager));
 	}

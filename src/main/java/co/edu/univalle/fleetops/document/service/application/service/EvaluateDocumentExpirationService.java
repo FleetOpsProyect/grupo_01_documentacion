@@ -12,6 +12,7 @@ import co.edu.univalle.fleetops.document.service.application.port.out.AuditLogRe
 import co.edu.univalle.fleetops.document.service.application.port.out.BusinessClock;
 import co.edu.univalle.fleetops.document.service.application.port.out.DocumentRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.DocumentRepository.ExpirationCandidate;
+import co.edu.univalle.fleetops.document.service.application.port.out.IdGenerator;
 import co.edu.univalle.fleetops.document.service.application.port.out.IssuedAlertRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.OutboxRepository;
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpiringSoon;
@@ -47,9 +48,11 @@ public final class EvaluateDocumentExpirationService implements EvaluateDocument
 
 	private final AlertThresholdPolicy alertPolicy;
 
+	private final IdGenerator idGenerator;
+
 	public EvaluateDocumentExpirationService(DocumentRepository documents, IssuedAlertRepository issuedAlerts,
 			AuditLogRepository auditLog, OutboxRepository outbox, BusinessClock clock,
-			DocumentStatusCalculator statusCalculator, AlertThresholdPolicy alertPolicy) {
+			DocumentStatusCalculator statusCalculator, AlertThresholdPolicy alertPolicy, IdGenerator idGenerator) {
 		this.documents = Objects.requireNonNull(documents, "documents");
 		this.issuedAlerts = Objects.requireNonNull(issuedAlerts, "issuedAlerts");
 		this.auditLog = Objects.requireNonNull(auditLog, "auditLog");
@@ -57,6 +60,7 @@ public final class EvaluateDocumentExpirationService implements EvaluateDocument
 		this.clock = Objects.requireNonNull(clock, "clock");
 		this.statusCalculator = Objects.requireNonNull(statusCalculator, "statusCalculator");
 		this.alertPolicy = Objects.requireNonNull(alertPolicy, "alertPolicy");
+		this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
 	}
 
 	@Override
@@ -94,7 +98,8 @@ public final class EvaluateDocumentExpirationService implements EvaluateDocument
 		OptionalInt published = decision.publishedThreshold();
 		if (published.isPresent()) {
 			int threshold = published.getAsInt();
-			UUID eventId = DocumentExpiringSoon.eventIdFor(candidate.documentId(), threshold);
+			// event_id no determinista, como el de los demás eventos; los duplicados los impide issued_alerts
+			UUID eventId = this.idGenerator.newId();
 			// El evento va primero: issued_alerts.outbox_event_id lo referencia
 			this.outbox.append(eventId, new DocumentExpiringSoon(candidate.documentId(), candidate.documentType(),
 					candidate.owner(), candidate.expirationDate(), threshold, daysRemaining, now), runId);

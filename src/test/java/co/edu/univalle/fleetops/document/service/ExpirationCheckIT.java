@@ -1,5 +1,6 @@
 package co.edu.univalle.fleetops.document.service;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -22,7 +23,6 @@ import org.testcontainers.utility.MountableFile;
 
 import co.edu.univalle.fleetops.document.service.application.port.in.CheckExpirationsUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.ExpirationCheckResult;
-import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpiringSoon;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -49,6 +49,11 @@ class ExpirationCheckIT {
 	private static final LocalDate TODAY = LocalDate.now(ZoneId.of("America/Bogota"));
 
 	private static final String EXPIRING_SOON_EVENT = "document_expiring_soon_event";
+
+	/**
+	 * UUID estándar de 128 bits en texto canónico (36 caracteres con guiones), versión 7 y variante RFC 9562.
+	 */
+	private static final String UUID_V7 = "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
 
 	@Autowired
 	private CheckExpirationsUseCase useCase;
@@ -83,15 +88,20 @@ class ExpirationCheckIT {
 			.contains("\"before\": {\"status\": \"VALID\"}")
 			.contains("\"after\": {\"status\": \"EXPIRING_SOON\"}");
 
-		// Evento con event_id determinista y payload de la hoja «Eventos SNS» (criterio 2)
+		// Evento con un event_id UUIDv7 no determinista y el payload de la hoja «Eventos SNS» (criterio 2)
 		Map<String, Object> event = this.jdbc.queryForMap("""
-				SELECT event_id, status, payload->>'event_type' AS event_type, payload->>'occurred_at' AS occurred_at,
+				SELECT event_id, payload->>'event_id' AS envelope_event_id, status,
+				       payload->>'event_type' AS event_type, payload->>'occurred_at' AS occurred_at,
 				       payload->'data'->>'threshold_days' AS threshold, payload->'data'->>'days_remaining' AS days,
 				       payload->'data'->>'expiration_date' AS expiration
 				FROM document.outbox_events WHERE aggregate_id = ? AND event_type = ?""", document,
 				EXPIRING_SOON_EVENT);
-		assertThat(event).containsEntry("event_id", DocumentExpiringSoon.eventIdFor(document, 30))
-			.containsEntry("status", "PENDING")
+		UUID eventId = (UUID) event.get("event_id");
+		assertThat((String) event.get("envelope_event_id")).isEqualTo(eventId.toString()).hasSize(36).matches(UUID_V7);
+		assertThat(eventId).isNotEqualTo(nameBasedId(document, 30));
+		assertThat(this.jdbc.queryForObject("SELECT outbox_event_id FROM document.issued_alerts "
+				+ "WHERE document_id = ? AND published", UUID.class, document)).isEqualTo(eventId);
+		assertThat(event).containsEntry("status", "PENDING")
 			.containsEntry("event_type", EXPIRING_SOON_EVENT)
 			.containsEntry("threshold", "30")
 			.containsEntry("days", "30")
@@ -125,9 +135,12 @@ class ExpirationCheckIT {
 
 		// Assert
 		assertThat(outboxCount(document)).isEqualTo(1);
-		assertThat(this.jdbc.queryForObject("SELECT event_id FROM document.outbox_events WHERE aggregate_id = ?",
-				UUID.class, document))
-			.isEqualTo(DocumentExpiringSoon.eventIdFor(document, 7));
+		UUID eventId = this.jdbc.queryForObject("SELECT event_id FROM document.outbox_events WHERE aggregate_id = ?",
+				UUID.class, document);
+		assertThat(eventId.toString()).matches(UUID_V7);
+		assertThat(eventId).isNotEqualTo(nameBasedId(document, 7));
+		assertThat(this.jdbc.queryForObject("SELECT outbox_event_id FROM document.issued_alerts "
+				+ "WHERE document_id = ? AND threshold_days = 7", UUID.class, document)).isEqualTo(eventId);
 		assertThat(issuedAlerts(document)).containsExactly(Map.of("threshold_days", 7, "published", true),
 				Map.of("threshold_days", 15, "published", false), Map.of("threshold_days", 30, "published", false));
 	}
@@ -224,6 +237,14 @@ class ExpirationCheckIT {
 		assertThat(result.failed()).isZero();
 		assertThat(result.evaluated()).isGreaterThanOrEqualTo(10_000);
 		assertThat(elapsed).isLessThan(Duration.ofMinutes(5));
+	}
+
+	/**
+	 * El UUID basado en nombre (versión 3) que se usaba antes como event_id determinista: el actual no debe coincidir.
+	 */
+	private static UUID nameBasedId(UUID document, int thresholdDays) {
+		return UUID.nameUUIDFromBytes(("document_expiring_soon_event:" + document + ":" + thresholdDays)
+			.getBytes(StandardCharsets.UTF_8));
 	}
 
 	private List<Map<String, Object>> issuedAlerts(UUID document) {
