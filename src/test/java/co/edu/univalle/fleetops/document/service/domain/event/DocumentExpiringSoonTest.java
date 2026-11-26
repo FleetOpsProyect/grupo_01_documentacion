@@ -38,17 +38,6 @@ class DocumentExpiringSoonTest {
 	}
 
 	@Test
-	void should_derive_the_same_event_id_for_the_same_document_and_threshold() {
-		// Criterio 2: dos instancias o una reejecución no generan eventos distintos
-		UUID first = DocumentExpiringSoon.eventIdFor(DOCUMENT_ID, 15);
-
-		assertThat(DocumentExpiringSoon.eventIdFor(DOCUMENT_ID, 15)).isEqualTo(first);
-		assertThat(DocumentExpiringSoon.eventIdFor(DOCUMENT_ID, 7)).isNotEqualTo(first);
-		assertThat(DocumentExpiringSoon.eventIdFor(UUID.randomUUID(), 15)).isNotEqualTo(first);
-		assertThat(first.version()).isEqualTo(3);
-	}
-
-	@Test
 	void should_reject_missing_fields() {
 		assertThatNullPointerException().isThrownBy(() -> new DocumentExpiringSoon(null, DocumentTypeCode.SOAT,
 				VEHICLE, EXPIRATION, 30, 30, NOW)).withMessage("documentId");
@@ -61,8 +50,6 @@ class DocumentExpiringSoonTest {
 				DocumentTypeCode.SOAT, VEHICLE, null, 30, 30, NOW)).withMessage("expirationDate");
 		assertThatNullPointerException().isThrownBy(() -> new DocumentExpiringSoon(DOCUMENT_ID,
 				DocumentTypeCode.SOAT, VEHICLE, EXPIRATION, 30, 30, null)).withMessage("occurredAt");
-		assertThatNullPointerException().isThrownBy(() -> DocumentExpiringSoon.eventIdFor(null, 30))
-			.withMessage("documentId");
 	}
 
 	@Test

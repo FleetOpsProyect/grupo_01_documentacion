@@ -1,6 +1,5 @@
 package co.edu.univalle.fleetops.document.service.domain.event;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Objects;
@@ -11,7 +10,8 @@ import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
 
 /**
  * Un documento alcanzó un umbral de alerta: {@code document_expiring_soon_event} (HU-DOC-06, DAS sec. 8.1). Lo
- * publica el job diario de vigencia; Notificaciones avisa al administrador de flota.
+ * publica el job diario de vigencia; Notificaciones avisa al administrador de flota. Su event_id, como el de todos los
+ * eventos del servicio, es un UUID nuevo no determinista (UUIDv7) que asigna la aplicación al guardarlo en el outbox.
  *
  * @param documentId documento por vencer
  * @param documentType tipo de documento (nunca PROPERTY_CARD, que no vence)
@@ -36,17 +36,6 @@ public record DocumentExpiringSoon(UUID documentId, DocumentTypeCode documentTyp
 		if (daysRemaining < 0 || daysRemaining > thresholdDays) {
 			throw new IllegalArgumentException("daysRemaining debe estar entre 0 y thresholdDays");
 		}
-	}
-
-	/**
-	 * event_id determinista: el mismo documento y umbral dan siempre el mismo identificador, así que dos instancias
-	 * del job o una reejecución no generan eventos distintos (HU-DOC-06, criterio 2). Es un UUID basado en nombre
-	 * (RFC 9562, versión 3), no un valor criptográfico.
-	 */
-	public static UUID eventIdFor(UUID documentId, int thresholdDays) {
-		Objects.requireNonNull(documentId, "documentId");
-		String name = "document_expiring_soon_event:" + documentId + ":" + thresholdDays;
-		return UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8));
 	}
 
 }

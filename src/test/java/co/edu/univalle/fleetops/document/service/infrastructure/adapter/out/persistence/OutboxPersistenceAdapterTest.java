@@ -161,13 +161,15 @@ class OutboxPersistenceAdapterTest {
 		given(this.repository.countByStatus("PENDING")).willReturn(4L);
 		given(this.repository.countByStatus("FAILED")).willReturn(1L);
 		given(this.repository.findOldestPendingCreatedAt()).willReturn(CREATED, (Instant) null);
-		new OutboxMetrics(this.repository, clock, registry);
+		// Micrometer guarda el objeto del gauge con una referencia débil: la prueba lo retiene, como Spring al bean
+		OutboxMetrics metrics = new OutboxMetrics(this.repository, clock, registry);
 
 		// Act + Assert
 		assertThat(registry.get(OutboxMetrics.EVENTS).tag("status", "pending").gauge().value()).isEqualTo(4);
 		assertThat(registry.get(OutboxMetrics.EVENTS).tag("status", "failed").gauge().value()).isEqualTo(1);
 		assertThat(registry.get(OutboxMetrics.OLDEST_PENDING_AGE).gauge().value()).isEqualTo(90);
 		assertThat(registry.get(OutboxMetrics.OLDEST_PENDING_AGE).gauge().value()).isZero();
+		assertThat(metrics).isNotNull();
 	}
 
 }
