@@ -19,6 +19,7 @@ import co.edu.univalle.fleetops.document.service.application.port.out.AuditLogRe
 import co.edu.univalle.fleetops.document.service.application.port.out.BusinessClock;
 import co.edu.univalle.fleetops.document.service.application.port.out.DocumentRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.DocumentRepository.ExpirationCandidate;
+import co.edu.univalle.fleetops.document.service.application.port.out.IdGenerator;
 import co.edu.univalle.fleetops.document.service.application.port.out.IssuedAlertRepository;
 import co.edu.univalle.fleetops.document.service.application.port.out.OutboxRepository;
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpiringSoon;
@@ -53,6 +54,11 @@ class EvaluateDocumentExpirationServiceTest {
 
 	private static final UUID RUN_ID = UUID.fromString("019aaa00-0000-7000-8000-0000000000a1");
 
+	/**
+	 * event_id que entrega el generador (UUIDv7 aleatorio en producción).
+	 */
+	private static final UUID EVENT_ID = UUID.fromString("019aaa00-0000-7000-8000-0000000000e7");
+
 	private static final OwnerRef VEHICLE = new OwnerRef(OwnerType.VEHICLE,
 			UUID.fromString("01960000-0000-7000-8000-000000000001"));
 
@@ -71,9 +77,13 @@ class EvaluateDocumentExpirationServiceTest {
 	@Mock
 	private BusinessClock clock;
 
+	@Mock
+	private IdGenerator idGenerator;
+
 	private EvaluateDocumentExpirationService service() {
 		return new EvaluateDocumentExpirationService(this.documents, this.issuedAlerts, this.auditLog, this.outbox,
-				this.clock, new DocumentStatusCalculator(30), new AlertThresholdPolicy(List.of(30, 15, 7, 1)));
+				this.clock, new DocumentStatusCalculator(30), new AlertThresholdPolicy(List.of(30, 15, 7, 1)),
+				this.idGenerator);
 	}
 
 	private void givenCandidate(int daysRemaining, DocumentStatus status) {
@@ -86,6 +96,7 @@ class EvaluateDocumentExpirationServiceTest {
 		// Arrange: VALID a 30 días, ningún umbral emitido
 		givenCandidate(30, DocumentStatus.VALID);
 		given(this.clock.now()).willReturn(NOW);
+		given(this.idGenerator.newId()).willReturn(EVENT_ID);
 		given(this.issuedAlerts.issuedThresholds(DOCUMENT_ID)).willReturn(Set.of());
 
 		// Act
@@ -93,7 +104,7 @@ class EvaluateDocumentExpirationServiceTest {
 
 		// Assert: estado, auditoría, evento y umbral (criterio 6)
 		assertThat(outcome).isEqualTo(DocumentExpirationOutcome.evaluated(true, true));
-		UUID eventId = DocumentExpiringSoon.eventIdFor(DOCUMENT_ID, 30);
+		UUID eventId = EVENT_ID;
 		InOrder order = inOrder(this.documents, this.auditLog, this.outbox, this.issuedAlerts);
 		order.verify(this.documents).updateStatus(DOCUMENT_ID, DocumentStatus.EXPIRING_SOON, NOW);
 		order.verify(this.auditLog)
@@ -110,6 +121,7 @@ class EvaluateDocumentExpirationServiceTest {
 		// Arrange (criterio 5, ADR-DOC-03): ya EXPIRING_SOON, a 5 días y solo se había emitido el de 30
 		givenCandidate(5, DocumentStatus.EXPIRING_SOON);
 		given(this.clock.now()).willReturn(NOW);
+		given(this.idGenerator.newId()).willReturn(EVENT_ID);
 		given(this.issuedAlerts.issuedThresholds(DOCUMENT_ID)).willReturn(Set.of(30));
 
 		// Act
@@ -117,7 +129,7 @@ class EvaluateDocumentExpirationServiceTest {
 
 		// Assert
 		assertThat(outcome).isEqualTo(DocumentExpirationOutcome.evaluated(true, false));
-		UUID eventId = DocumentExpiringSoon.eventIdFor(DOCUMENT_ID, 7);
+		UUID eventId = EVENT_ID;
 		verify(this.outbox).append(eq(eventId), any(DocumentExpiringSoon.class), eq(RUN_ID));
 		verify(this.issuedAlerts).record(DOCUMENT_ID, 7, eventId, NOW);
 		verify(this.issuedAlerts).record(DOCUMENT_ID, 15, null, NOW);
@@ -207,22 +219,29 @@ class EvaluateDocumentExpirationServiceTest {
 		DocumentStatusCalculator calculator = new DocumentStatusCalculator(30);
 		AlertThresholdPolicy policy = new AlertThresholdPolicy(List.of(30));
 		assertThatNullPointerException().isThrownBy(() -> new EvaluateDocumentExpirationService(null,
-				this.issuedAlerts, this.auditLog, this.outbox, this.clock, calculator, policy))
+				this.issuedAlerts, this.auditLog, this.outbox, this.clock, calculator, policy, this.idGenerator))
 			.withMessage("documents");
 		assertThatNullPointerException().isThrownBy(() -> new EvaluateDocumentExpirationService(this.documents,
-				null, this.auditLog, this.outbox, this.clock, calculator, policy)).withMessage("issuedAlerts");
+				null, this.auditLog, this.outbox, this.clock, calculator, policy, this.idGenerator))
+			.withMessage("issuedAlerts");
 		assertThatNullPointerException().isThrownBy(() -> new EvaluateDocumentExpirationService(this.documents,
-				this.issuedAlerts, null, this.outbox, this.clock, calculator, policy)).withMessage("auditLog");
+				this.issuedAlerts, null, this.outbox, this.clock, calculator, policy, this.idGenerator))
+			.withMessage("auditLog");
 		assertThatNullPointerException().isThrownBy(() -> new EvaluateDocumentExpirationService(this.documents,
-				this.issuedAlerts, this.auditLog, null, this.clock, calculator, policy)).withMessage("outbox");
+				this.issuedAlerts, this.auditLog, null, this.clock, calculator, policy, this.idGenerator))
+			.withMessage("outbox");
 		assertThatNullPointerException().isThrownBy(() -> new EvaluateDocumentExpirationService(this.documents,
-				this.issuedAlerts, this.auditLog, this.outbox, null, calculator, policy)).withMessage("clock");
+				this.issuedAlerts, this.auditLog, this.outbox, null, calculator, policy, this.idGenerator))
+			.withMessage("clock");
 		assertThatNullPointerException().isThrownBy(() -> new EvaluateDocumentExpirationService(this.documents,
-				this.issuedAlerts, this.auditLog, this.outbox, this.clock, null, policy))
+				this.issuedAlerts, this.auditLog, this.outbox, this.clock, null, policy, this.idGenerator))
 			.withMessage("statusCalculator");
 		assertThatNullPointerException().isThrownBy(() -> new EvaluateDocumentExpirationService(this.documents,
-				this.issuedAlerts, this.auditLog, this.outbox, this.clock, calculator, null))
+				this.issuedAlerts, this.auditLog, this.outbox, this.clock, calculator, null, this.idGenerator))
 			.withMessage("alertPolicy");
+		assertThatNullPointerException().isThrownBy(() -> new EvaluateDocumentExpirationService(this.documents,
+				this.issuedAlerts, this.auditLog, this.outbox, this.clock, calculator, policy, null))
+			.withMessage("idGenerator");
 		assertThatNullPointerException().isThrownBy(() -> service().evaluate(null, TODAY, RUN_ID))
 			.withMessage("documentId");
 		assertThatNullPointerException().isThrownBy(() -> service().evaluate(DOCUMENT_ID, null, RUN_ID))
