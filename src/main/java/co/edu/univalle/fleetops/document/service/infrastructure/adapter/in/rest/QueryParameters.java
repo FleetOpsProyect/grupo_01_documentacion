@@ -1,5 +1,9 @@
 package co.edu.univalle.fleetops.document.service.infrastructure.adapter.in.rest;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.util.UUID;
+
 import co.edu.univalle.fleetops.document.service.application.port.in.InvalidQueryParameterException;
 import co.edu.univalle.fleetops.document.service.application.port.in.PageQuery;
 
@@ -54,6 +58,63 @@ final class QueryParameters {
 	static PageQuery toPageQuery(String page, String size) {
 		return new PageQuery(toInt(page, PageQuery.DEFAULT_PAGE, PageQuery.INVALID_PAGE),
 				toInt(size, PageQuery.DEFAULT_SIZE, PageQuery.INVALID_SIZE));
+	}
+
+	/**
+	 * @param value texto recibido; null si el parámetro no llegó
+	 * @param name nombre del filtro en la URL
+	 * @return UUID convertido, o null si no llegó
+	 */
+	static UUID toUuid(String value, String name) {
+		if (value == null) {
+			return null;
+		}
+
+		return parseUuid(value, "Valor de filtro no válido: " + name);
+	}
+
+	/**
+	 * @param value texto recibido
+	 * @param errorMessage mensaje si el identificador es inválido
+	 * @return UUID convertido
+	 */
+	static UUID parseUuid(String value, String errorMessage) {
+		if (value == null) {
+			throw new InvalidQueryParameterException(errorMessage);
+		}
+
+		UUID uuid;
+
+		try {
+			uuid = UUID.fromString(value);
+		}
+		catch (IllegalArgumentException ex) {
+			throw new InvalidQueryParameterException(errorMessage);
+		}
+
+		if (!uuid.toString().equalsIgnoreCase(value)) {
+			throw new InvalidQueryParameterException(errorMessage);
+		}
+
+		return uuid;
+	}
+
+	/**
+	 * @param value texto recibido; null si el parámetro no llegó
+	 * @param name nombre del filtro en la URL
+	 * @return fecha convertida, o null si no llegó
+	 */
+	static LocalDate toDate(String value, String name) {
+		if (value == null) {
+			return null;
+		}
+
+		try {
+			return LocalDate.parse(value);
+		}
+		catch (DateTimeParseException ex) {
+			throw InvalidQueryParameterException.invalidFilter(name);
+		}
 	}
 
 }

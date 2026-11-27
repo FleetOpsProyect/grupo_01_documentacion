@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -25,6 +26,7 @@ import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.entity.DocumentJpaEntity;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.repository.DocumentJpaRepository;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.persistence.repository.DocumentJpaRepository.ExpiringDocumentRow;
+import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentQuery;
 
 /**
  * Adaptador de {@link DocumentRepository} sobre JPA.
@@ -75,6 +77,38 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 		catch (DataIntegrityViolationException ex) {
 			throw translate(ex, document);
 		}
+	}
+
+	@Override
+	public Optional<Document> findById(UUID documentId) {
+		return this.repository.findById(documentId)
+				.map(DocumentPersistenceMapper::toDomain);
+	}
+
+	@Override
+	public PageResult<Document> findDocuments(
+			ListDocumentQuery query, LocalDate today, LocalDate alertHorizon) {
+
+		PageQuery pageQuery = query.pageQuery();
+
+		Page<DocumentJpaEntity> rows = this.repository.findDocuments(
+				(query.ownerType() != null) ? query.ownerType().name() : null,
+				query.ownerId(),
+				(query.documentType() != null) ? query.documentType().name() : null,
+				(query.status() != null) ? query.status().name() : null,
+				query.expirationDateFrom(),
+				query.expirationDateTo(),
+				today,
+				alertHorizon,
+				PageRequest.of(pageQuery.page(), pageQuery.size()));
+
+		List<Document> content = rows.getContent()
+				.stream()
+				.map(DocumentPersistenceMapper::toDomain)
+				.toList();
+
+		return new PageResult<>(content, pageQuery.page(), pageQuery.size(),
+				rows.getTotalElements(), rows.getTotalPages());
 	}
 
 	@Override
@@ -152,6 +186,15 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 			return Document.activeDocumentConflict(document.documentType());
 		}
 		return ex;
+	}
+
+	private static String constraintName(Throwable ex) {
+		for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
+			if (cause instanceof ConstraintViolationException violation) {
+				return violation.getConstraintName();
+			}
+		}
+		return null;
 	}
 
 }

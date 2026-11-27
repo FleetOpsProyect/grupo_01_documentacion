@@ -40,6 +40,10 @@ import co.edu.univalle.fleetops.document.service.domain.service.DocumentStatusCa
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.clock.ZonedBusinessClock;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.id.UuidV7Generator;
 import co.edu.univalle.fleetops.document.service.infrastructure.adapter.out.observability.MdcCorrelationIdProvider;
+import co.edu.univalle.fleetops.document.service.application.port.in.GetDocumentUseCase;
+import co.edu.univalle.fleetops.document.service.application.service.GetDocumentService;
+import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentsUseCase;
+import co.edu.univalle.fleetops.document.service.application.service.ListDocumentsService;
 
 /**
  * Composition Root: cablea de forma explícita los puertos con sus adaptadores y los casos de uso con sus
@@ -103,6 +107,26 @@ public class CoreConfiguration {
 		RegisterDocumentService service = new RegisterDocumentService(documentTypes, owners, documents, auditLog,
 				outbox, idGenerator, correlationIds, businessClock, statusCalculator);
 		return new TransactionalRegisterDocumentUseCase(service, new TransactionTemplate(transactionManager));
+	}
+
+	/**
+	 * HU-DOC-03. Consulta de documentos por identificador.
+	 */
+	@Bean
+	GetDocumentUseCase getDocumentUseCase(DocumentRepository documents, BusinessClock businessClock,
+			DocumentStatusCalculator statusCalculator) {
+
+		return new GetDocumentService(documents, businessClock, statusCalculator);
+	}
+
+	/**
+	 * HU-DOC-03. Listado de documentos con filtros y paginación.
+	 */
+	@Bean
+	ListDocumentsUseCase listDocumentsUseCase(DocumentRepository documents, BusinessClock businessClock,
+			  DocumentStatusCalculator statusCalculator, AlertThresholdPolicy alertPolicy) {
+
+		return new ListDocumentsService(documents, businessClock, statusCalculator, alertPolicy);
 	}
 
 	/**

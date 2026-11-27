@@ -90,6 +90,45 @@ public interface DocumentJpaRepository extends JpaRepository<DocumentJpaEntity, 
 			@Param("documentType") String documentType, @Param("ownerType") String ownerType, Pageable pageable);
 
 	/**
+	 * Listado general de documentos con filtros combinables (HU-DOC-03).
+	 * Evalúa los estados activos según la fecha de negocio.
+	 */
+	@Query("""
+		SELECT d FROM DocumentJpaEntity d
+		WHERE (:ownerType IS NULL OR d.ownerType = :ownerType)
+		  AND (:ownerId IS NULL OR d.ownerId = :ownerId)
+		  AND (:documentType IS NULL OR d.documentType = :documentType)
+		  AND (:expirationDateFrom IS NULL OR d.expirationDate >= :expirationDateFrom)
+		  AND (:expirationDateTo IS NULL OR d.expirationDate <= :expirationDateTo)
+		  AND (
+		    (:status IS NULL AND d.status <> 'CANCELLED')
+		    OR (:status = 'CANCELLED' AND d.status = 'CANCELLED')
+		    OR (:status = 'REPLACED' AND d.status = 'REPLACED')
+		    OR (
+		      d.status IN ('VALID', 'EXPIRING_SOON', 'EXPIRED')
+		      AND (
+		        (:status = 'EXPIRED' AND d.expirationDate < :today)
+		        OR (:status = 'EXPIRING_SOON'
+		            AND d.expirationDate BETWEEN :today AND :alertHorizon)
+		        OR (:status = 'VALID'
+		            AND (d.expirationDate IS NULL OR d.expirationDate > :alertHorizon))
+		      )
+		    )
+		  )
+		ORDER BY d.expirationDate ASC NULLS LAST, d.documentId ASC
+		""")
+	Page<DocumentJpaEntity> findDocuments(
+			@Param("ownerType") String ownerType,
+			@Param("ownerId") UUID ownerId,
+			@Param("documentType") String documentType,
+			@Param("status") String status,
+			@Param("expirationDateFrom") LocalDate expirationDateFrom,
+			@Param("expirationDateTo") LocalDate expirationDateTo,
+			@Param("today") LocalDate today,
+			@Param("alertHorizon") LocalDate alertHorizon,
+			Pageable pageable);
+
+	/**
 	 * Fila que devuelve {@link #findExpiringBetween}. Spring llena cada método con la columna del mismo alias en la
 	 * consulta (por ejemplo, {@code AS licensePlate} llena {@code getLicensePlate()}).
 	 */

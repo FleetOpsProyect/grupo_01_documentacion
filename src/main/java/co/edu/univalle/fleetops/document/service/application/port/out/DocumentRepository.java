@@ -15,6 +15,7 @@ import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerRef;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
+import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentQuery;
 
 /**
  * Puerto de salida: persistencia de documentos (Repository).
@@ -39,6 +40,25 @@ public interface DocumentRepository {
 	 * datos rechaza el documento por unicidad, por ejemplo con dos registros simultáneos
 	 */
 	void save(Document document);
+
+	/**
+	 * Busca un documento por su identificador.
+	 * Incluye documentos REPLACED y CANCELLED.
+	 *
+	 * @param documentId identificador del documento
+	 * @return documento encontrado, si existe
+	 */
+	Optional<Document> findById(UUID documentId);
+
+	/**
+	 * Consulta documentos aplicando filtros y paginación (HU-DOC-03).
+	 *
+	 * @param query filtros y paginación solicitados
+	 * @param today fecha de negocio
+	 * @param alertHorizon fecha límite del umbral mayor de alerta
+	 * @return página de documentos encontrados
+	 */
+	PageResult<Document> findDocuments(ListDocumentQuery query, LocalDate today, LocalDate alertHorizon);
 
 	/**
 	 * Documentos vigentes o vencidos del propietario, excluyendo REPLACED y CANCELLED.
@@ -76,7 +96,7 @@ public interface DocumentRepository {
 	 * Datos del documento que usa el job de vigencia.
 	 */
 	record ExpirationCandidate(UUID documentId, DocumentTypeCode documentType, OwnerRef owner,
-			LocalDate expirationDate, DocumentStatus status) {
+							   LocalDate expirationDate, DocumentStatus status) {
 
 		public ExpirationCandidate {
 			Objects.requireNonNull(documentId, "documentId");

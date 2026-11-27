@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -19,12 +21,14 @@ import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceU
 import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceView;
 import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentCommand;
 import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.GetDocumentUseCase;
+import co.edu.univalle.fleetops.document.service.domain.exception.ResourceNotFoundException;
 import co.edu.univalle.fleetops.document.service.domain.exception.BusinessRuleViolationException;
 import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflictException;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
-import co.edu.univalle.fleetops.document.service.domain.exception.ResourceNotFoundException;
+import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentsUseCase;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItems;
@@ -64,7 +68,13 @@ class DocumentControllerTest {
 	private RegisterDocumentUseCase registerDocument;
 
 	@MockitoBean
+	private GetDocumentUseCase getDocument;
+
+	@MockitoBean
 	private ComplianceUseCase compliance;
+
+	@MockitoBean
+	private ListDocumentsUseCase listDocuments;
 
 	@Test
 	void should_respond_201_with_location_snake_case_body_and_correlation_id() throws Exception {
@@ -188,6 +198,61 @@ class DocumentControllerTest {
 	}
 
 	@Test
+	void should_respond_200_when_document_exists() throws Exception {
+		// Arrange
+		given(this.getDocument.getById(DOCUMENT_ID))
+				.willReturn(soatView());
+
+		// Act + Assert
+		this.mockMvc.perform(get("/documents/{id}", DOCUMENT_ID))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.document_id")
+						.value(DOCUMENT_ID.toString()))
+				.andExpect(jsonPath("$.document_type").value("SOAT"))
+				.andExpect(jsonPath("$.owner_type").value("VEHICLE"))
+				.andExpect(jsonPath("$.status").value("VALID"))
+				.andExpect(jsonPath("$.days_remaining").value(339));
+
+		verify(this.getDocument).getById(DOCUMENT_ID);
+	}
+
+	@Test
+	void should_respond_404_when_document_does_not_exist() throws Exception {
+		// Arrange
+		given(this.getDocument.getById(DOCUMENT_ID))
+				.willThrow(new ResourceNotFoundException(
+						"Documento no encontrado"));
+
+		// Act + Assert
+		this.mockMvc.perform(get("/documents/{id}", DOCUMENT_ID))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.title")
+						.value("Recurso no encontrado"))
+				.andExpect(jsonPath("$.detail")
+						.value("Documento no encontrado"));
+
+		verify(this.getDocument).getById(DOCUMENT_ID);
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {
+			"uuid-invalido",
+			"1-1-1-1-1",
+			"550e8400-e29b-41d4-a716-44665544000",
+			"550e8400-e29b-41d4-a716-44665544000g"
+	})
+	void should_respond_400_when_document_id_is_not_a_uuid(
+			String documentId) throws Exception {
+
+		this.mockMvc.perform(get("/documents/{id}", documentId))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.detail")
+						.value("El identificador debe ser un UUID válido"));
+
+		verifyNoInteractions(this.getDocument);
+	}
+
+	@Test
 	void should_evaluate_vehicle_compliance_with_the_required_query_parameters() throws Exception {
 		given(this.compliance.evaluate(any())).willReturn(new ComplianceView(
 				OwnerType.VEHICLE, VEHICLE_ID, LocalDate.of(2026, 10, 26), false,
@@ -245,7 +310,7 @@ class DocumentControllerTest {
 		Instant now = Instant.parse("2026-10-26T15:04:05Z");
 		return new DocumentView(DOCUMENT_ID, DocumentTypeCode.SOAT, OwnerType.VEHICLE, VEHICLE_ID,
 				"AT-1300-0045-2026", "Seguros Demo S.A.", LocalDate.of(2026, 10, 1), LocalDate.of(2027, 9, 30), null,
-				DocumentStatus.VALID, 339, now, now);
+				DocumentStatus.VALID, 339, null, null, null, now, now);
 	}
 
 }

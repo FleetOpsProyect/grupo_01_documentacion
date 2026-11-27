@@ -50,8 +50,9 @@ class DocumentViewTest {
 
 		// Assert
 		assertThat(view).isEqualTo(new DocumentView(DOCUMENT_ID, DocumentTypeCode.PROPERTY_CARD, OwnerType.VEHICLE,
-				VEHICLE_ID, "TP-1", "Tránsito", LocalDate.of(2020, 5, 10), null, null, DocumentStatus.VALID, null, NOW,
-				NOW));
+				VEHICLE_ID, "TP-1", "Tránsito", LocalDate.of(2020, 5, 10),
+				null, null, DocumentStatus.VALID, null,
+				null, null, null, NOW, NOW));
 	}
 
 	@Test
