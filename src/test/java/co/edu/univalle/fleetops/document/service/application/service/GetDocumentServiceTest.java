@@ -16,6 +16,8 @@ import co.edu.univalle.fleetops.document.service.domain.model.ValidityPeriod;
 import co.edu.univalle.fleetops.document.service.application.port.out.BusinessClock;
 import co.edu.univalle.fleetops.document.service.application.port.out.DocumentRepository;
 import co.edu.univalle.fleetops.document.service.domain.service.DocumentStatusCalculator;
+import co.edu.univalle.fleetops.document.service.domain.exception.ResourceNotFoundException;
+
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -24,6 +26,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 public class GetDocumentServiceTest {
 	@Test
@@ -280,4 +285,35 @@ public class GetDocumentServiceTest {
 		assertEquals(10, result.daysRemaining());
 		assertEquals(DocumentStatus.VALID, document.status());
 	}
+
+	@Test
+	void should_throw_exception_when_document_is_not_found() {
+
+		// Arrange
+		DocumentRepository repository = mock(DocumentRepository.class);
+		BusinessClock clock = mock(BusinessClock.class);
+
+		DocumentStatusCalculator calculator =
+				new DocumentStatusCalculator(30);
+
+		GetDocumentService service =
+				new GetDocumentService(repository, clock, calculator);
+
+		UUID documentId = UUID.randomUUID();
+
+		given(repository.findById(documentId))
+				.willReturn(Optional.empty());
+
+		// Act
+		ResourceNotFoundException exception = assertThrows(
+				ResourceNotFoundException.class,
+				() -> service.getById(documentId));
+
+		// Assert
+		assertEquals("Documento no encontrado", exception.getMessage());
+
+		verify(repository).findById(documentId);
+		verifyNoInteractions(clock);
+	}
+
 }
