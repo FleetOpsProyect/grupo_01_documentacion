@@ -163,4 +163,16 @@ public class DocumentJpaEntity {
 		this.updatedAt = changedAt;
 	}
 
+	/**
+	 * Persiste los datos de anulación del documento (HU-DOC-04).
+	 *
+	 * @param reason motivo de anulación validado por el dominio
+	 * @param cancelledAt instante de anulación
+	 */
+	public void applyCancellation(String reason, Instant cancelledAt) {
+		changeStatus("CANCELLED", cancelledAt);
+		this.cancellationReason = reason;
+		this.cancelledAt = cancelledAt;
+	}
+
 }

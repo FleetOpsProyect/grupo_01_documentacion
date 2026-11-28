@@ -19,6 +19,7 @@ import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
 import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceUseCase;
 import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentsUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.CancelDocumentUseCase;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.BDDMockito.given;
@@ -46,6 +47,9 @@ class DocumentHistoryControllerTest {
 
 	@MockitoBean
 	private ListDocumentsUseCase listDocuments;
+
+	@MockitoBean
+	private CancelDocumentUseCase cancelDocument;
 
 	@Test
 	void should_return_historical_fields_when_document_is_cancelled()

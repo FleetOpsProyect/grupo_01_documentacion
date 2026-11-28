@@ -25,6 +25,7 @@ import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDoc
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
+import co.edu.univalle.fleetops.document.service.application.port.in.CancelDocumentUseCase;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
@@ -64,6 +65,9 @@ class DocumentListControllerTest {
 
 	@MockitoBean
 	private ListDocumentsUseCase listDocuments;
+
+	@MockitoBean
+	private CancelDocumentUseCase cancelDocument;
 
 	@Test
 	void should_return_documents_with_default_pagination() throws Exception {

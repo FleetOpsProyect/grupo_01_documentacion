@@ -25,4 +25,11 @@ public interface AuditLogRepository {
 	void recordStatusChange(UUID documentId, DocumentStatus previous, DocumentStatus current, UUID correlationId,
 			Instant changedAt);
 
+	/**
+	 * Registra la acción CANCELLED con el antes y el después del documento (HU-DOC-04, criterio 7).
+	 * @param previous documento antes de la anulación
+	 * @param cancelled documento anulado
+	 * @param correlationId correlación de la petición
+	 */
+	void recordCancellation(Document previous, Document cancelled, UUID correlationId);
 }

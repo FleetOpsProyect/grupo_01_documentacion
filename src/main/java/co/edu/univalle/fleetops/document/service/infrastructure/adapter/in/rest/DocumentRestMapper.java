@@ -1,7 +1,10 @@
 package co.edu.univalle.fleetops.document.service.infrastructure.adapter.in.rest;
 
+import java.util.UUID;
+
 import co.edu.univalle.fleetops.document.service.application.port.in.DocumentView;
 import co.edu.univalle.fleetops.document.service.application.port.in.RegisterDocumentCommand;
+import co.edu.univalle.fleetops.document.service.application.port.in.CancelDocumentCommand;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
 
@@ -20,6 +23,20 @@ final class DocumentRestMapper {
 		return new RegisterDocumentCommand(DocumentTypeCode.valueOf(request.documentType()),
 				OwnerType.valueOf(request.ownerType()), request.ownerId(), request.documentNumber(),
 				request.issuingEntity(), request.issueDate(), request.expirationDate(), request.licenseCategory());
+	}
+
+	/**
+	 * Convierte la petición REST en un comando de anulación.
+	 * @param documentId identificador del documento
+	 * @param request cuerpo de la petición
+	 * @return comando de anulación
+	 */
+	static CancelDocumentCommand toCommand(UUID documentId,
+										   CancelDocumentRequest request) {
+
+		String reason = (request == null) ? null : request.reason();
+
+		return new CancelDocumentCommand(documentId, reason);
 	}
 
 	static DocumentResponse toResponse(DocumentView view) {

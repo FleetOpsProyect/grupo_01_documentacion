@@ -44,6 +44,8 @@ import co.edu.univalle.fleetops.document.service.application.port.in.GetDocument
 import co.edu.univalle.fleetops.document.service.application.service.GetDocumentService;
 import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentsUseCase;
 import co.edu.univalle.fleetops.document.service.application.service.ListDocumentsService;
+import co.edu.univalle.fleetops.document.service.application.port.in.CancelDocumentUseCase;
+import co.edu.univalle.fleetops.document.service.application.service.CancelDocumentService;
 
 /**
  * Composition Root: cablea de forma explícita los puertos con sus adaptadores y los casos de uso con sus
@@ -107,6 +109,22 @@ public class CoreConfiguration {
 		RegisterDocumentService service = new RegisterDocumentService(documentTypes, owners, documents, auditLog,
 				outbox, idGenerator, correlationIds, businessClock, statusCalculator);
 		return new TransactionalRegisterDocumentUseCase(service, new TransactionTemplate(transactionManager));
+	}
+
+	/**
+	 * HU-DOC-04: anulación de documentos.
+	 * Solo se expone el decorador transaccional como implementación del puerto.
+	 */
+	@Bean
+	CancelDocumentUseCase cancelDocumentUseCase(DocumentRepository documents,
+			AuditLogRepository auditLog, CorrelationIdProvider correlationIds, BusinessClock businessClock,
+			PlatformTransactionManager transactionManager) {
+
+		CancelDocumentService service = new CancelDocumentService(
+				documents, auditLog, correlationIds, businessClock);
+
+		return new TransactionalCancelDocumentUseCase(service,
+				new TransactionTemplate(transactionManager));
 	}
 
 	/**

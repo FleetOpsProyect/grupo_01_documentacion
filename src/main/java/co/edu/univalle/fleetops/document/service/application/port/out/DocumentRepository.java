@@ -51,6 +51,24 @@ public interface DocumentRepository {
 	Optional<Document> findById(UUID documentId);
 
 	/**
+	 * Busca un documento bloqueando su fila hasta el fin de la transacción.
+	 *
+	 * @param documentId identificador del documento
+	 * @return documento encontrado, si existe
+	 */
+	Optional<Document> findByIdForUpdate(UUID documentId);
+
+	/**
+	 * Persiste la anulación de un documento existente (HU-DOC-04).
+	 *
+	 * Requiere que el documento haya sido bloqueado previamente
+	 * dentro de la misma transacción.
+	 *
+	 * @param document documento anulado
+	 */
+	void updateCancellation(Document document);
+
+	/**
 	 * Consulta documentos aplicando filtros y paginación (HU-DOC-03).
 	 *
 	 * @param query filtros y paginación solicitados

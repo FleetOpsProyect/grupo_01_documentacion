@@ -86,6 +86,22 @@ public class DocumentPersistenceAdapter implements DocumentRepository {
 	}
 
 	@Override
+	public Optional<Document> findByIdForUpdate(UUID documentId) {
+		return this.repository.findForUpdate(documentId)
+				.map(DocumentPersistenceMapper::toDomain);
+	}
+
+	@Override
+	public void updateCancellation(Document document) {
+		DocumentJpaEntity entity = this.repository.findById(document.id())
+				.orElseThrow(() -> new IllegalStateException(
+						"El documento " + document.id() + " no existe"));
+
+		entity.applyCancellation(
+				document.cancellationReason(), document.cancelledAt());
+	}
+
+	@Override
 	public PageResult<Document> findDocuments(
 			ListDocumentQuery query, LocalDate today, LocalDate alertHorizon) {
 

@@ -29,6 +29,7 @@ import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumen
 import co.edu.univalle.fleetops.document.service.application.port.in.PageResult;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
+import co.edu.univalle.fleetops.document.service.application.port.in.CancelDocumentUseCase;
 
 /**
  * Adaptador de entrada REST de documentos (DAS sec. 7).
@@ -43,17 +44,20 @@ public class DocumentController {
 	private final GetDocumentUseCase getDocument;
 	private final ComplianceUseCase compliance;
 	private final ListDocumentsUseCase listDocuments;
+	private final CancelDocumentUseCase cancelDocument;
 
 	public DocumentController(
 			RegisterDocumentUseCase registerDocument,
 			GetDocumentUseCase getDocument,
 			ComplianceUseCase compliance,
-			ListDocumentsUseCase listDocuments) {
+			ListDocumentsUseCase listDocuments,
+			CancelDocumentUseCase cancelDocument) {
 
 		this.registerDocument = registerDocument;
 		this.getDocument = getDocument;
 		this.compliance = compliance;
 		this.listDocuments = listDocuments;
+		this.cancelDocument = cancelDocument;
 	}
 
 	@GetMapping("/compliance")
@@ -98,7 +102,6 @@ public class DocumentController {
 
 	/**
 	 * HU-DOC-03. Consulta un documento por su identificador.
-	 *
 	 * @param documentId identificador del documento
 	 * @return información del documento con su vigencia actual
 	 */
@@ -113,6 +116,26 @@ public class DocumentController {
 
 		return ResponseEntity.ok(
 				DocumentRestMapper.toResponse(view));
+	}
+
+	/**
+	 * Anula un documento registrado por error (HU-DOC-04).
+	 * @param documentId identificador recibido en la ruta
+	 * @param request cuerpo de la petición de anulación
+	 * @return documento anulado
+	 */
+	@PostMapping("/{id}/cancellation")
+	public ResponseEntity<DocumentResponse> cancel(
+			@PathVariable("id") String documentId,
+			@RequestBody(required = false) CancelDocumentRequest request) {
+
+		UUID id = QueryParameters.parseUuid(documentId,
+				"El identificador debe ser un UUID válido");
+
+		DocumentView view = this.cancelDocument.cancel(
+				DocumentRestMapper.toCommand(id, request));
+
+		return ResponseEntity.ok(DocumentRestMapper.toResponse(view));
 	}
 
 	/**

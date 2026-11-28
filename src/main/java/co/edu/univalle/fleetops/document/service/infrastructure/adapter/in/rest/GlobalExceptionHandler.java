@@ -6,6 +6,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import java.net.URI;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.TypeMismatchException;
@@ -29,6 +31,7 @@ import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflict
 import co.edu.univalle.fleetops.document.service.domain.exception.ResourceNotFoundException;
 import co.edu.univalle.fleetops.document.service.application.port.in.ComplianceParameterException;
 import co.edu.univalle.fleetops.document.service.application.port.in.InvalidQueryParameterException;
+import co.edu.univalle.fleetops.document.service.domain.exception.InvalidCancellationReasonException;
 
 /**
  * Traduce las excepciones a Problem Details (RFC 9457) siguiendo las convenciones del DAS sec. 7: 400 para
@@ -47,6 +50,20 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(BusinessRuleViolationException.class)
 	ProblemDetail handleBusinessRuleViolation(BusinessRuleViolationException ex) {
 		return problem(HttpStatus.UNPROCESSABLE_CONTENT, "Regla de negocio no cumplida", ex.getMessage());
+	}
+
+	@ExceptionHandler(InvalidCancellationReasonException.class)
+	ProblemDetail handleInvalidCancellationReason(InvalidCancellationReasonException ex) {
+
+		ProblemDetail body = problem(HttpStatus.UNPROCESSABLE_CONTENT, "Datos inválidos", ex.getMessage());
+
+		body.setType(URI.create("about:blank"));
+
+		body.setProperty(DETAILS_PROPERTY, List.of(
+				Map.of("campo", "reason",
+						"mensaje", "Debe tener entre 10 y 200 caracteres")));
+
+		return body;
 	}
 
 	@ExceptionHandler(DomainConflictException.class)
@@ -112,8 +129,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@Override
 	protected ResponseEntity<Object> handleTypeMismatch(TypeMismatchException ex, HttpHeaders headers,
 			HttpStatusCode status, WebRequest request) {
-		if ("id".equals(ex.getPropertyName())
-				&& UUID.class.equals(ex.getRequiredType())) {
+		if ("id".equals(ex.getPropertyName()) && UUID.class.equals(ex.getRequiredType())) {
 
 			ProblemDetail body = problem(
 					HttpStatus.BAD_REQUEST,

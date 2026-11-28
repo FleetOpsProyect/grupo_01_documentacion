@@ -29,6 +29,7 @@ import co.edu.univalle.fleetops.document.service.domain.model.DocumentStatus;
 import co.edu.univalle.fleetops.document.service.domain.model.DocumentTypeCode;
 import co.edu.univalle.fleetops.document.service.domain.model.OwnerType;
 import co.edu.univalle.fleetops.document.service.application.port.in.ListDocumentsUseCase;
+import co.edu.univalle.fleetops.document.service.application.port.in.CancelDocumentUseCase;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItems;
@@ -75,6 +76,9 @@ class DocumentControllerTest {
 
 	@MockitoBean
 	private ListDocumentsUseCase listDocuments;
+
+	@MockitoBean
+	private CancelDocumentUseCase cancelDocument;
 
 	@Test
 	void should_respond_201_with_location_snake_case_body_and_correlation_id() throws Exception {

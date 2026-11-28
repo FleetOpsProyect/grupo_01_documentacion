@@ -10,11 +10,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpired;
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentRegistered;
 import co.edu.univalle.fleetops.document.service.domain.event.DomainEvent;
 import co.edu.univalle.fleetops.document.service.domain.exception.BusinessRuleViolationException;
+import co.edu.univalle.fleetops.document.service.domain.exception.InvalidCancellationReasonException;
 import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflictException;
 import co.edu.univalle.fleetops.document.service.domain.service.DocumentStatusCalculator;
 
@@ -335,6 +337,133 @@ class DocumentTest {
 				.isThrownBy(() -> Document.register(registration(VEHICLE, LocalDate.of(2027, 9, 30), null), SOAT,
 						DocumentTest.this.calculator, TODAY, null))
 				.withMessage("now");
+		}
+
+	}
+
+	@Nested
+	class WhenCancellingADocument {
+
+		private static final Instant CANCELLATION_TIME =
+				Instant.parse("2026-11-27T15:00:00Z");
+
+		private static final String REASON = "Documento registrado por error";
+
+		private static final UUID PREVIOUS_DOCUMENT_ID =
+				UUID.fromString("01960000-0000-7000-8000-000000000002");
+
+		@ParameterizedTest
+		@EnumSource(value = DocumentStatus.class,
+				names = { "VALID", "EXPIRING_SOON", "EXPIRED" })
+		void should_cancel_an_active_document(DocumentStatus status) {
+			// Arrange
+			Document original = documentWithStatus(status);
+
+			// Act
+			Document cancelled = original.cancel(REASON, CANCELLATION_TIME);
+
+			// Assert
+			assertThat(cancelled).isNotSameAs(original);
+			assertThat(cancelled.status()).isEqualTo(DocumentStatus.CANCELLED);
+			assertThat(cancelled.cancellationReason()).isEqualTo(REASON);
+			assertThat(cancelled.cancelledAt()).isEqualTo(CANCELLATION_TIME);
+			assertThat(cancelled.updatedAt()).isEqualTo(CANCELLATION_TIME);
+
+			assertThat(cancelled.id()).isEqualTo(original.id());
+			assertThat(cancelled.documentType()).isEqualTo(original.documentType());
+			assertThat(cancelled.owner()).isEqualTo(original.owner());
+			assertThat(cancelled.documentNumber()).isEqualTo(original.documentNumber());
+			assertThat(cancelled.issuingEntity()).isEqualTo(original.issuingEntity());
+			assertThat(cancelled.validity()).isEqualTo(original.validity());
+			assertThat(cancelled.licenseCategory()).isEqualTo(original.licenseCategory());
+			assertThat(cancelled.createdAt()).isEqualTo(original.createdAt());
+			assertThat(cancelled.previousDocumentId()).isEqualTo(PREVIOUS_DOCUMENT_ID);
+
+			assertThat(original.status()).isEqualTo(status);
+			assertThat(original.cancellationReason()).isNull();
+			assertThat(original.cancelledAt()).isNull();
+			assertThat(original.updatedAt()).isEqualTo(NOW);
+
+			assertThat(cancelled.pullDomainEvents()).isEmpty();
+			assertThat(cancelled.status().reservesDocumentNumber()).isFalse();
+		}
+
+		@ParameterizedTest
+		@EnumSource(value = DocumentStatus.class,
+				names = { "REPLACED", "CANCELLED" })
+		void should_reject_cancellation_of_a_terminal_document(DocumentStatus status) {
+			Document original = documentWithStatus(status);
+
+			assertThatExceptionOfType(DomainConflictException.class)
+					.isThrownBy(() -> original.cancel(REASON, CANCELLATION_TIME))
+					.withMessage("El documento no se puede modificar en su estado actual");
+		}
+
+		@ParameterizedTest
+		@NullAndEmptySource
+		@ValueSource(strings = { "   ", "123456789" })
+		void should_reject_an_invalid_cancellation_reason(String reason) {
+			Document original = documentWithStatus(DocumentStatus.VALID);
+
+			assertThatExceptionOfType(InvalidCancellationReasonException.class)
+					.isThrownBy(() -> original.cancel(reason, CANCELLATION_TIME))
+					.withMessage(
+							"El motivo de anulación es obligatorio y debe tener entre 10 y 200 caracteres");
+		}
+
+		@Test
+		void should_reject_a_reason_longer_than_200_characters() {
+			Document original = documentWithStatus(DocumentStatus.VALID);
+
+			assertThatExceptionOfType(InvalidCancellationReasonException.class)
+					.isThrownBy(() -> original.cancel("A".repeat(201), CANCELLATION_TIME))
+					.withMessage(
+							"El motivo de anulación es obligatorio y debe tener entre 10 y 200 caracteres");
+		}
+
+		@ParameterizedTest
+		@ValueSource(ints = { 10, 200 })
+		void should_accept_the_cancellation_reason_limits(int length) {
+			Document original = documentWithStatus(DocumentStatus.VALID);
+			String reason = "A".repeat(length);
+
+			Document cancelled = original.cancel(reason, CANCELLATION_TIME);
+
+			assertThat(cancelled.cancellationReason()).isEqualTo(reason);
+			assertThat(cancelled.status()).isEqualTo(DocumentStatus.CANCELLED);
+		}
+
+		@Test
+		void should_strip_the_cancellation_reason() {
+			Document original = documentWithStatus(DocumentStatus.VALID);
+
+			Document cancelled = original.cancel("  " + REASON + "  ", CANCELLATION_TIME);
+
+			assertThat(cancelled.cancellationReason()).isEqualTo(REASON);
+		}
+
+		@Test
+		void should_reject_a_missing_cancellation_instant() {
+			Document original = documentWithStatus(DocumentStatus.VALID);
+
+			assertThatNullPointerException()
+					.isThrownBy(() -> original.cancel(REASON, null))
+					.withMessage("now");
+		}
+
+		private Document documentWithStatus(DocumentStatus status) {
+			DocumentRegistration data = registration(
+					DRIVER, LocalDate.of(2034, 3, 1), new LicenseCategory("B1"));
+
+			return Document.reconstitute(
+					data,
+					DocumentTypeCode.DRIVER_LICENSE,
+					status,
+					NOW,
+					NOW,
+					PREVIOUS_DOCUMENT_ID,
+					null,
+					null);
 		}
 
 	}

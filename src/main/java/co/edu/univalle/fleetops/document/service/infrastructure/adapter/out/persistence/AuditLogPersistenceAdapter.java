@@ -28,6 +28,8 @@ public class AuditLogPersistenceAdapter implements AuditLogRepository {
 
 	static final String ACTION_STATUS_CHANGED = "STATUS_CHANGED";
 
+	static final String ACTION_CANCELLED = "CANCELLED";
+
 	private static final String STATUS = "status";
 
 	private final EntityManager entityManager;
@@ -62,6 +64,24 @@ public class AuditLogPersistenceAdapter implements AuditLogRepository {
 				ACTION_STATUS_CHANGED, this.jsonMapper.writeValueAsString(changes), null, correlationId, changedAt));
 	}
 
+	@Override
+	public void recordCancellation(Document previous, Document cancelled,
+								   UUID correlationId) {
+
+		Map<String, Object> changes = new LinkedHashMap<>();
+		changes.put("before", cancellationSnapshot(previous));
+		changes.put("after", cancellationSnapshot(cancelled));
+
+		this.entityManager.persist(new DocumentAuditLogJpaEntity(
+				this.idGenerator.newId(),
+				cancelled.id(),
+				ACTION_CANCELLED,
+				this.jsonMapper.writeValueAsString(changes),
+				cancelled.cancellationReason(),
+				correlationId,
+				cancelled.cancelledAt()));
+	}
+
 	private static Map<String, Object> snapshot(Document document) {
 		Map<String, Object> after = new LinkedHashMap<>();
 		after.put("document_type", document.documentType().name());
@@ -77,6 +97,22 @@ public class AuditLogPersistenceAdapter implements AuditLogRepository {
 				(document.licenseCategory() != null) ? document.licenseCategory().value() : null);
 		after.put("status", document.status().name());
 		return after;
+	}
+
+	/**
+	 * Construye una representación del documento para la auditoría de anulación.
+	 * @param document documento que se desea representar
+	 * @return datos del documento y de su anulación
+	 */
+	private static Map<String, Object> cancellationSnapshot(Document document) {
+		Map<String, Object> data = snapshot(document);
+
+		data.put("cancellation_reason", document.cancellationReason());
+		data.put("cancelled_at",
+				(document.cancelledAt() != null) ? document.cancelledAt().toString() : null);
+		data.put("updated_at", document.updatedAt().toString());
+
+		return data;
 	}
 
 }

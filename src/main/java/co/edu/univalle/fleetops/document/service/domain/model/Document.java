@@ -11,6 +11,7 @@ import co.edu.univalle.fleetops.document.service.domain.event.DocumentExpired;
 import co.edu.univalle.fleetops.document.service.domain.event.DocumentRegistered;
 import co.edu.univalle.fleetops.document.service.domain.event.DomainEvent;
 import co.edu.univalle.fleetops.document.service.domain.exception.BusinessRuleViolationException;
+import co.edu.univalle.fleetops.document.service.domain.exception.InvalidCancellationReasonException;
 import co.edu.univalle.fleetops.document.service.domain.exception.DomainConflictException;
 import co.edu.univalle.fleetops.document.service.domain.service.DocumentStatusCalculator;
 
@@ -25,6 +26,10 @@ import co.edu.univalle.fleetops.document.service.domain.service.DocumentStatusCa
 public final class Document {
 
 	static final int ISSUING_ENTITY_MAX_LENGTH = 150;
+
+	private static final int CANCELLATION_REASON_MIN_LENGTH = 10;
+
+	private static final int CANCELLATION_REASON_MAX_LENGTH = 200;
 
 	private final UUID id;
 
@@ -143,6 +148,39 @@ public final class Document {
 				cancelledAt);
 	}
 
+	/**
+	 * Anula un documento registrado por error (HU-DOC-04).
+	 *
+	 * @param reason motivo de anulación
+	 * @param now instante actual en UTC
+	 * @return documento anulado con el mismo identificador
+	 */
+	public Document cancel(String reason, Instant now) {
+		checkModifiableState();
+
+		String cancellationReason = requireCancellationReason(reason);
+
+		Objects.requireNonNull(now, "now");
+
+		DocumentRegistration registration = new DocumentRegistration(
+				this.id,
+				this.owner,
+				this.documentNumber,
+				this.issuingEntity,
+				this.validity,
+				this.licenseCategory);
+
+		return Document.reconstitute(
+				registration,
+				this.documentType,
+				DocumentStatus.CANCELLED,
+				this.createdAt,
+				now,
+				this.previousDocumentId,
+				cancellationReason,
+				now);
+	}
+
 	private static void checkTypeIsActive(DocumentTypeRules rules) {
 		if (!rules.active()) {
 			throw new BusinessRuleViolationException("El tipo de documento " + rules.code() + " no está habilitado");
@@ -176,6 +214,13 @@ public final class Document {
 		}
 	}
 
+	private void checkModifiableState() {
+		if (!this.status.isActive()) {
+			throw new DomainConflictException(
+					"El documento no se puede modificar en su estado actual");
+		}
+	}
+
 	private static String requireIssuingEntity(String issuingEntity) {
 		if (issuingEntity == null || issuingEntity.isBlank()) {
 			throw new BusinessRuleViolationException("issuing_entity es obligatoria");
@@ -185,6 +230,17 @@ public final class Document {
 			throw new BusinessRuleViolationException(
 					"issuing_entity no puede tener más de " + ISSUING_ENTITY_MAX_LENGTH + " caracteres");
 		}
+		return value;
+	}
+
+	private static String requireCancellationReason(String reason) {
+		String value = (reason == null) ? "" : reason.strip();
+
+		if (value.length() < CANCELLATION_REASON_MIN_LENGTH
+				|| value.length() > CANCELLATION_REASON_MAX_LENGTH) {
+			throw new InvalidCancellationReasonException();
+		}
+
 		return value;
 	}
 
