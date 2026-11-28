@@ -1,0 +1,483 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  FleetOps Documentacion y Seguros - mensajeria SNS+SQS y rol de la EC2. Sin llaves de acceso en el servicio: la EC2
+  usa su perfil de instancia (IMDSv2).
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    arch: GitHub Actions -llaves-> SSM -> EC2 (docker compose, fuera de este stack) ; app -IMDSv2-> Ec2Role -> SNS publish fleetops_document_events & SQS consume 2 colas propias (+DLQ) suscritas a fleetops_driver_events y fleetops_vehicle_events
+    must:
+      - region del proyecto (us-east-2); nada en otra region
+      - nombres de topicos y colas = contrato (DAS 8 / application.yaml); cambiar nombre rompe app y suscriptores
+      - todo en la misma cuenta (decision D-6 del 24-11-2026)
+    ref:
+      - at: infra/aws/README.md
+        has: paso a paso de despliegue y configuracion manual
+      - at: context/G01_DAS_Documentos.md
+        has: DAS, ADR-DOC-05/12/14/15, seccion 8
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Topicos de los productores }
+        Parameters: [DriverTopicArn, VehicleTopicArn]
+      - Label: { default: Colas }
+        Parameters: [QueueVisibilityTimeoutSeconds]
+      - Label: { default: Alarmas }
+        Parameters: [AlarmEmail]
+
+Parameters:
+  DriverTopicArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-z-]*:sns:[a-z0-9-]+:\d{12}:[A-Za-z0-9_-]+$'
+    Description: >-
+      ARN del topico de Conductores (fleetops_driver_events). Vacio = el stack lo crea en esta cuenta hasta que
+      Conductores tenga el suyo.
+  VehicleTopicArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-z-]*:sns:[a-z0-9-]+:\d{12}:[A-Za-z0-9_-]+$'
+    Description: >-
+      ARN del topico de Vehiculos (fleetops_vehicle_events). Vacio = el stack lo crea en esta cuenta hasta que
+      Vehiculos tenga el suyo.
+  QueueVisibilityTimeoutSeconds:
+    Type: Number
+    Default: 30
+    MinValue: 10
+    MaxValue: 900
+    Description: Tiempo que un mensaje recibido queda oculto antes de reintentarse (3 recepciones -> DLQ)
+  AlarmEmail:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    Description: Correo que recibe las alarmas de las DLQ (vacio = alarmas sin notificacion; hay que confirmar el correo)
+
+Conditions:
+  CreateDriverTopic: !Equals [!Ref DriverTopicArn, '']
+  CreateVehicleTopic: !Equals [!Ref VehicleTopicArn, '']
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+
+Resources:
+  # ------------------------------------------------------------------------------------------------ topicos
+  DocumentEventsTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: topico propio donde el publicador del outbox envia los eventos (ADR-DOC-05/14); cifrado con la llave administrada aws/sns (sin costo de llave)
+        must:
+          - TopicName fijo = MESSAGING_DOCUMENT_TOPIC_ARN del servidor y contrato con suscriptores
+          - publicador necesita kms:GenerateDataKey*/Decrypt via SNS (ver Ec2Role)
+        mutable: change-with-constraints
+        mutability:
+          TopicName: must-never-change
+    Properties:
+      TopicName: fleetops_document_events
+      KmsMasterKeyId: alias/aws/sns
+      Tags:
+        - { Key: project, Value: fleetops }
+        - { Key: service, Value: documents }
+
+  DocumentEventsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: rechaza publicaciones sin TLS; el acceso de la misma cuenta lo dan las politicas de IAM
+    Properties:
+      Topics: [!Ref DocumentEventsTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: sns:Publish
+            Resource: !Ref DocumentEventsTopic
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  DriverEventsTopic:
+    Type: AWS::SNS::Topic
+    Condition: CreateDriverTopic
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: topico de Conductores mientras ese equipo no tenga el suyo en la cuenta; se conserva al borrar el stack porque otro equipo publica en el
+        must:
+          - nombre fijo fleetops_driver_events (contrato de Conductores)
+          - si Conductores crea el suyo -> pasar DriverTopicArn y no duplicar el nombre
+    Properties:
+      TopicName: fleetops_driver_events
+      KmsMasterKeyId: alias/aws/sns
+      Tags:
+        - { Key: project, Value: fleetops }
+        - { Key: owner-pending, Value: driver }
+
+  VehicleEventsTopic:
+    Type: AWS::SNS::Topic
+    Condition: CreateVehicleTopic
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: topico de Vehiculos mientras ese equipo no tenga el suyo en la cuenta; se conserva al borrar el stack
+        must:
+          - nombre fijo fleetops_vehicle_events (contrato de Vehiculos)
+          - si Vehiculos crea el suyo -> pasar VehicleTopicArn y no duplicar el nombre
+    Properties:
+      TopicName: fleetops_vehicle_events
+      KmsMasterKeyId: alias/aws/sns
+      Tags:
+        - { Key: project, Value: fleetops }
+        - { Key: owner-pending, Value: vehicle }
+
+  # ------------------------------------------------------------------------------------------------ colas
+  DriverEventsDlq:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: mensajes de Conductores que fallaron 3 veces; 14 dias (maximo) para revisarlos
+    Properties:
+      QueueName: fleetops_document_driver_events_dlq
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  DriverEventsQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: cola propia suscrita a fleetops_driver_events (HU-DOC-10); long polling 20 s; SSE-SQS (KMS-CMK no requerido y complica la entrega desde SNS)
+        must:
+          - QueueName fijo = fleetops.messaging.queues.driver-events (application.yaml)
+          - maxReceiveCount = 3 (HU-DOC-10 criterio 6)
+          - VisibilityTimeout > tiempo de procesar un mensaje
+        mutable: change-with-constraints
+        mutability:
+          QueueName: must-never-change
+    Properties:
+      QueueName: fleetops_document_driver_events_queue
+      VisibilityTimeout: !Ref QueueVisibilityTimeoutSeconds
+      ReceiveMessageWaitTimeSeconds: 20
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DriverEventsDlq.Arn
+        maxReceiveCount: 3
+
+  VehicleEventsDlq:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: mensajes de Vehiculos que fallaron 3 veces; 14 dias (maximo) para revisarlos
+    Properties:
+      QueueName: fleetops_document_vehicle_events_dlq
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  VehicleEventsQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: cola propia suscrita a fleetops_vehicle_events (HU-DOC-10); long polling 20 s; SSE-SQS
+        must:
+          - QueueName fijo = fleetops.messaging.queues.vehicle-events (application.yaml)
+          - maxReceiveCount = 3 (HU-DOC-10 criterio 6)
+        mutable: change-with-constraints
+        mutability:
+          QueueName: must-never-change
+    Properties:
+      QueueName: fleetops_document_vehicle_events_queue
+      VisibilityTimeout: !Ref QueueVisibilityTimeoutSeconds
+      ReceiveMessageWaitTimeSeconds: 20
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt VehicleEventsDlq.Arn
+        maxReceiveCount: 3
+
+  DriverEventsQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: solo el topico de Conductores puede escribir en la cola (aws:SourceArn + aws:SourceAccount contra confused deputy); sin TLS se rechaza
+        must:
+          - SourceArn = topico suscrito; si cambia el topico, actualizar aqui o SNS no entrega
+    Properties:
+      Queues: [!Ref DriverEventsQueue]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowProducerTopic
+            Effect: Allow
+            Principal: { Service: sns.amazonaws.com }
+            Action: sqs:SendMessage
+            Resource: !GetAtt DriverEventsQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !If [CreateDriverTopic, !Ref DriverEventsTopic, !Ref DriverTopicArn]
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: sqs:*
+            Resource: !GetAtt DriverEventsQueue.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  VehicleEventsQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: solo el topico de Vehiculos puede escribir en la cola; sin TLS se rechaza
+        must:
+          - SourceArn = topico suscrito
+    Properties:
+      Queues: [!Ref VehicleEventsQueue]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowProducerTopic
+            Effect: Allow
+            Principal: { Service: sns.amazonaws.com }
+            Action: sqs:SendMessage
+            Resource: !GetAtt VehicleEventsQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !If [CreateVehicleTopic, !Ref VehicleEventsTopic, !Ref VehicleTopicArn]
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: sqs:*
+            Resource: !GetAtt VehicleEventsQueue.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  # SQS exige exactamente un recurso por statement: una politica por DLQ
+  DriverEventsDlqPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref DriverEventsDlq]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: sqs:*
+            Resource: !GetAtt DriverEventsDlq.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  VehicleEventsDlqPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref VehicleEventsDlq]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: sqs:*
+            Resource: !GetAtt VehicleEventsDlq.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  # ------------------------------------------------------------------------------------------------ suscripciones
+  DriverEventsSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: DriverEventsQueuePolicy
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: entrega a la cola propia solo los eventos de Conductores que consume Documentacion; raw delivery = el cuerpo es el sobre de dominio
+        must:
+          - filtro solo por Message Attribute event_type, nunca por el cuerpo (decision del 15-11-2026)
+          - RawMessageDelivery true (el consumidor no desenvuelve el sobre de SNS)
+    Properties:
+      TopicArn: !If [CreateDriverTopic, !Ref DriverEventsTopic, !Ref DriverTopicArn]
+      Protocol: sqs
+      Endpoint: !GetAtt DriverEventsQueue.Arn
+      RawMessageDelivery: true
+      FilterPolicyScope: MessageAttributes
+      FilterPolicy:
+        event_type: [driver_activated_event, driver_deactivated_event]
+
+  VehicleEventsSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: VehicleEventsQueuePolicy
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: entrega a la cola propia solo los eventos de Vehiculos que consume Documentacion; raw delivery
+        must:
+          - filtro solo por Message Attribute event_type
+          - RawMessageDelivery true
+    Properties:
+      TopicArn: !If [CreateVehicleTopic, !Ref VehicleEventsTopic, !Ref VehicleTopicArn]
+      Protocol: sqs
+      Endpoint: !GetAtt VehicleEventsQueue.Arn
+      RawMessageDelivery: true
+      FilterPolicyScope: MessageAttributes
+      FilterPolicy:
+        event_type: [vehicle_created_event, vehicle_deleted_event]
+
+  # ------------------------------------------------------------------------------------------------ rol de la EC2
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: credenciales temporales del servicio por IMDSv2 (perfil de instancia); reemplaza llaves estaticas; incluye SSM core para que el despliegue por SSM siga funcionando
+        must:
+          - minimo privilegio: solo las 2 colas propias y el topico propio
+          - mantener AmazonSSMManagedInstanceCore o el despliegue por SSM deja de funcionar
+          - IMDSv2 con hop limit 2 en la instancia (el contenedor esta a 1 salto mas)
+        mutable: change-with-constraints
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-ec2'
+      Description: Rol de la EC2 del servicio de Documentacion (SNS publish, SQS consume, SSM)
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: consume-owner-events
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ConsumeOwnQueues
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueUrl
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !GetAtt DriverEventsQueue.Arn
+                  - !GetAtt VehicleEventsQueue.Arn
+        - PolicyName: publish-document-events
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PublishOwnTopic
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref DocumentEventsTopic
+              - Sid: UseSnsManagedKeyViaSns
+                Effect: Allow
+                Action:
+                  - kms:GenerateDataKey*
+                  - kms:Decrypt
+                Resource: !Sub 'arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub 'sns.${AWS::Region}.amazonaws.com'
+                    kms:CallerAccount: !Ref AWS::AccountId
+      Tags:
+        - { Key: project, Value: fleetops }
+        - { Key: service, Value: documents }
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-ec2'
+      Roles: [!Ref Ec2Role]
+
+  # ------------------------------------------------------------------------------------------------ alarmas
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlarmEmail
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: avisa por correo las alarmas; sin cifrado KMS porque CloudWatch no puede publicar en topicos cifrados con la llave administrada aws/sns (solo lleva el texto de la alarma)
+    Properties:
+      Tags:
+        - { Key: project, Value: fleetops }
+
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  DriverDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: un mensaje en la DLQ = un evento de Conductores que no se pudo aplicar a la replica
+    Properties:
+      AlarmDescription: Hay mensajes en fleetops_document_driver_events_dlq (eventos de Conductores que fallaron 3 veces)
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - { Name: QueueName, Value: !GetAtt DriverEventsDlq.QueueName }
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmEmail, [!Ref AlarmTopic], !Ref AWS::NoValue]
+
+  VehicleDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: un mensaje en la DLQ = un evento de Vehiculos que no se pudo aplicar a la replica
+    Properties:
+      AlarmDescription: Hay mensajes en fleetops_document_vehicle_events_dlq (eventos de Vehiculos que fallaron 3 veces)
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - { Name: QueueName, Value: !GetAtt VehicleEventsDlq.QueueName }
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmEmail, [!Ref AlarmTopic], !Ref AWS::NoValue]
+
+Outputs:
+  DocumentTopicArn:
+    Description: Valor de MESSAGING_DOCUMENT_TOPIC_ARN en el .env del servidor
+    Value: !Ref DocumentEventsTopic
+  DriverTopicArnInUse:
+    Description: Topico de Conductores al que se suscribio la cola (creado por el stack o el recibido por parametro)
+    Value: !If [CreateDriverTopic, !Ref DriverEventsTopic, !Ref DriverTopicArn]
+  VehicleTopicArnInUse:
+    Description: Topico de Vehiculos al que se suscribio la cola
+    Value: !If [CreateVehicleTopic, !Ref VehicleEventsTopic, !Ref VehicleTopicArn]
+  DriverQueueUrl:
+    Description: Cola de eventos de Conductores
+    Value: !Ref DriverEventsQueue
+  VehicleQueueUrl:
+    Description: Cola de eventos de Vehiculos
+    Value: !Ref VehicleEventsQueue
+  Ec2InstanceProfileName:
+    Description: Perfil de instancia que hay que asociar a la EC2 (paso 3 del README)
+    Value: !Ref Ec2InstanceProfile
+  Ec2RoleArn:
+    Description: Rol de la EC2
+    Value: !GetAtt Ec2Role.Arn

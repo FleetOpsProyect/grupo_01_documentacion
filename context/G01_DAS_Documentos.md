@@ -72,7 +72,7 @@ Documentación es productor de un solo tópico SNS y consumidor de dos. No llama
 
 ## **4\. Requisitos arquitectónicamente significativos**
 
-### **4.1 Del backlog a la arquitectura** 
+### **4.1 Del backlog a la arquitectura**
 
 | HU | De qué trata | Exigencia arquitectónica |
 | :---- | :---- | :---- |
@@ -113,14 +113,14 @@ No se incluyen autenticidad ni no repudio, que dependen de definir la autenticac
 
 ## **5\. Restricciones**
 
-* Es un microservicio independiente con **base de datos propia**; ningún otro servicio accede a ella.  
-* Decisión de negocio: cada vehículo tiene **tres documentos** (SOAT, tecnomecánica y tarjeta de propiedad) y cada conductor **una única licencia**; la tarjeta de propiedad no tiene vencimiento.  
-* Comunicación asíncrona mediante **AWS SNS + SQS** (ADR-DOC-12, decidido por el equipo FleetOps el 26-10-2026). Publica en el tópico SNS **fleetops\_document\_events** y consume, mediante colas SQS propias, los tópicos SNS de Vehículos y Conductores (sección 8). Los nombres de tópicos, colas y tipos de evento usan snake\_case en inglés (ADR-DOC-14).  
-* Los eventos usan el sobre estándar del catálogo y se publican con el patrón Outbox.  
-* API REST con JSON, documentada en OpenAPI dentro del repositorio fleetops-contracts, junto con los esquemas de los eventos.  
-* La base de datos debe ofrecer transacciones y restricciones únicas, porque varias reglas del backlog dependen de ellas (renovación, alertas sin duplicados, un documento activo por tipo).  
-* Configuración solo por variables de entorno; nada sensible en el repositorio.  
-* Contexto colombiano: SOAT, revisión tecnomecánica, tarjeta de propiedad y licencia de conducción; la zona horaria de referencia es America/Bogota y con ella se calcula la fecha de negocio («hoy») en todo el servicio (ADR-DOC-13).  
+* Es un microservicio independiente con **base de datos propia**; ningún otro servicio accede a ella.
+* Decisión de negocio: cada vehículo tiene **tres documentos** (SOAT, tecnomecánica y tarjeta de propiedad) y cada conductor **una única licencia**; la tarjeta de propiedad no tiene vencimiento.
+* Comunicación asíncrona mediante **AWS SNS + SQS** (ADR-DOC-12, decidido por el equipo FleetOps el 26-10-2026). Publica en el tópico SNS **fleetops\_document\_events** y consume, mediante colas SQS propias, los tópicos SNS de Vehículos y Conductores (sección 8). Los nombres de tópicos, colas y tipos de evento usan snake\_case en inglés (ADR-DOC-14).
+* Los eventos usan el sobre estándar del catálogo y se publican con el patrón Outbox.
+* API REST con JSON, documentada en OpenAPI dentro del repositorio fleetops-contracts, junto con los esquemas de los eventos.
+* La base de datos debe ofrecer transacciones y restricciones únicas, porque varias reglas del backlog dependen de ellas (renovación, alertas sin duplicados, un documento activo por tipo).
+* Configuración solo por variables de entorno; nada sensible en el repositorio.
+* Contexto colombiano: SOAT, revisión tecnomecánica, tarjeta de propiedad y licencia de conducción; la zona horaria de referencia es America/Bogota y con ella se calcula la fecha de negocio («hoy») en todo el servicio (ADR-DOC-13).
 * El SAD general todavía no define el lenguaje, el framework ni el motor de base de datos. Este servicio adopta Java 21, Spring Boot 4.1.1 y **PostgreSQL 18 o superior**, con el schema **document** (sección 14), en línea con el diagrama de arquetipo (sección 15). Falta ratificarlo en el SAD general.
 
 ## **6\. Modelo de dominio y datos**
@@ -156,16 +156,16 @@ El día del vencimiento el documento está EXPIRING\_SOON con days\_remaining 0 
 
 ### **6.3 Reglas de negocio clave**
 
-* La combinación tipo \+ document\_number es única entre los documentos no anulados. Un documento CANCELLED libera su número: se registró por error y puede registrarse de nuevo, por ejemplo con el propietario correcto. REPLACED lo sigue reservando, porque una renovación trae un número nuevo (v0.4).  
-* Un propietario tiene como máximo un documento activo por tipo: un vehículo, un SOAT, una tecnomecánica y una tarjeta de propiedad; un conductor, una licencia. Para cambiar de documento se usa la renovación.  
-* document\_number cumple ^[A-Za-z0-9-]{5,30}$ e issuing\_entity tiene entre 3 y 100 caracteres (HU-DOC-01, v0.5).  
-* issue\_date no puede ser posterior a la fecha actual (HU-DOC-01, v0.5).  
-* expiration\_date es obligatoria para SOAT, tecnomecánica y licencia, y debe ser posterior a issue\_date; en la tarjeta de propiedad va vacía.  
-* license\_category es obligatoria en DRIVER\_LICENSE (una sola categoría por licencia) y va vacía en los documentos de vehículo.  
-* El propietario debe existir en la réplica local y estar activo (is\_active = true); si no, se responde 422.  
-* La fecha actual de todas las reglas es la fecha de negocio en America/Bogota (ADR-DOC-13).  
-* document\_type, owner\_type y owner\_id no se pueden modificar.  
-* En una renovación, la nueva expiration\_date debe ser posterior a la del documento anterior y futura. No aplica a la tarjeta de propiedad.  
+* La combinación tipo \+ document\_number es única entre los documentos no anulados. Un documento CANCELLED libera su número: se registró por error y puede registrarse de nuevo, por ejemplo con el propietario correcto. REPLACED lo sigue reservando, porque una renovación trae un número nuevo (v0.4).
+* Un propietario tiene como máximo un documento activo por tipo: un vehículo, un SOAT, una tecnomecánica y una tarjeta de propiedad; un conductor, una licencia. Para cambiar de documento se usa la renovación.
+* document\_number cumple ^[A-Za-z0-9-]{5,30}$ e issuing\_entity tiene entre 3 y 100 caracteres (HU-DOC-01, v0.5).
+* issue\_date no puede ser posterior a la fecha actual (HU-DOC-01, v0.5).
+* expiration\_date es obligatoria para SOAT, tecnomecánica y licencia, y debe ser posterior a issue\_date; en la tarjeta de propiedad va vacía.
+* license\_category es obligatoria en DRIVER\_LICENSE (una sola categoría por licencia) y va vacía en los documentos de vehículo.
+* El propietario debe existir en la réplica local y estar activo (is\_active = true); si no, se responde 422.
+* La fecha actual de todas las reglas es la fecha de negocio en America/Bogota (ADR-DOC-13).
+* document\_type, owner\_type y owner\_id no se pueden modificar.
+* En una renovación, la nueva expiration\_date debe ser posterior a la del documento anterior y futura. No aplica a la tarjeta de propiedad.
 * Un vehículo cumple (HU-DOC-09) si tiene SOAT y tecnomecánica VALID o EXPIRING\_SOON y una tarjeta de propiedad VALID; un conductor cumple si su licencia está VALID o EXPIRING\_SOON.
 
 ### **6.4 Datos propios del servicio**
@@ -289,19 +289,19 @@ Reglas del consumidor (HU-DOC-10):
 
 **Vencimiento de un documento**
 
-1. El job diario marca el documento como EXPIRED y guarda document\_expired\_event en el outbox.  
-2. El publicador lo envía al tópico SNS fleetops\_document\_events.  
+1. El job diario marca el documento como EXPIRED y guarda document\_expired\_event en el outbox.
+2. El publicador lo envía al tópico SNS fleetops\_document\_events.
 3. Vehículos (o Conductores) agrega el bloqueo DOCUMENT y publica el cambio de estado; Notificaciones avisa; Reportes actualiza su base de lectura.
 
 **Renovación**
 
-1. El administrador llama a POST/documents/{id}/renewals.  
-2. En una sola transacción se crea el documento nuevo, el anterior pasa a REPLACED y se guarda document\_renewed\_event en el outbox.  
+1. El administrador llama a POST/documents/{id}/renewals.
+2. En una sola transacción se crea el documento nuevo, el anterior pasa a REPLACED y se guarda document\_renewed\_event en el outbox.
 3. Vehículos (o Conductores) quita el bloqueo causado por el documento anterior y, si no quedan otros bloqueos, el vehículo vuelve a AVAILABLE.
 
 **Alta de un vehículo y su primer documento**
 
-1. Vehículos publica vehicle\_created\_event y Documentación actualiza su réplica.  
+1. Vehículos publica vehicle\_created\_event y Documentación actualiza su réplica.
 2. Solo a partir de ese momento POST /documents acepta documentos de ese vehículo.
 
 ## **9\. Componentes y decisiones**
@@ -340,11 +340,11 @@ Reglas del consumidor (HU-DOC-10):
 
 ## **10\. Aspectos transversales**
 
-* **Seguridad y privacidad:** Los logs no incluyen contraseñas ni tokens. La autenticación y los roles se heredan del SAD general y aún no están definidos para este servicio.  
+* **Seguridad y privacidad:** Los logs no incluyen contraseñas ni tokens. La autenticación y los roles se heredan del SAD general y aún no están definidos para este servicio.
 * **Observabilidad:** logs JSON por salida estándar con marca de tiempo en UTC (decisión del equipo del 08-11-2026, P-08: a diferencia de la API, los eventos y las sesiones de la base de datos, que usan -05:00), nivel, correlation\_id y mensaje; el job termina con un resumen (evaluados, emitidos, fallidos); /health y las métricas de lag y de mensajes en la cola de errores del catálogo. Desde v0.11, el outbox expone en Micrometer fleetops.outbox.events{status=pending|failed} y fleetops.outbox.oldest.pending.age (segundos); no forman parte de /health.
-* **Resiliencia:** con la base de datos caída, los endpoints responden 503 en menos de 2 segundos; con AWS SNS/SQS caído o inalcanzable, los endpoints siguen respondiendo y los eventos esperan en el outbox; un error en un documento no detiene la verificación de los demás.  
-* **Configuración:** credenciales, umbrales y conexión a AWS (región, tópico SNS, colas SQS) llegan por variables de entorno. El perfil de Spring (SPRING\_PROFILES\_ACTIVE) elige entre el emulador local y AWS real (ADR-DOC-15); en AWS las credenciales vienen del rol de la instancia, nunca de variables.  
-* **Entrega:** Dockerfile; arranque con docker compose up , con su propia base de datos y esquema creado automáticamente; el pipeline compila y prueba en cada pull request y publica la imagen al integrar a main.  
+* **Resiliencia:** con la base de datos caída, los endpoints responden 503 en menos de 2 segundos; con AWS SNS/SQS caído o inalcanzable, los endpoints siguen respondiendo y los eventos esperan en el outbox; un error en un documento no detiene la verificación de los demás.
+* **Configuración:** credenciales, umbrales y conexión a AWS (región, tópico SNS, colas SQS) llegan por variables de entorno. El perfil de Spring (SPRING\_PROFILES\_ACTIVE) elige entre el emulador local y AWS real (ADR-DOC-15); en AWS las credenciales vienen del rol de la instancia, nunca de variables.
+* **Entrega:** Dockerfile; arranque con docker compose up , con su propia base de datos y esquema creado automáticamente; el pipeline compila y prueba en cada pull request y publica la imagen al integrar a main.
 * **Pruebas:** unitarias para estados y fechas (por ejemplo, vencimiento el 20 de octubre: EXPIRING\_SOON ese día y EXPIRED desde el 21); de integración para renovaciones concurrentes, doble ejecución del job y tarjeta de propiedad sin vencimiento (fuera del job); de contrato para eventos y OpenAPI.
 
 ## **11\. Riesgos iniciales**
@@ -386,8 +386,8 @@ El backlog actual difiere del SAD general y del catálogo de topics en varios pu
 
 ## **13\. Próximos pasos**
 
-1. Definir los esquemas de eventos y el OpenAPI del servicio.  
-2. Elaborar el ERD del servicio y el diagrama de componentes.  
+1. Definir los esquemas de eventos y el OpenAPI del servicio.
+2. Elaborar el ERD del servicio y el diagrama de componentes.
 3. Orden sugerido de construcción: HU-DOC-11 (esqueleto operable), HU-DOC-10 (sin réplicas no se puede registrar nada), HU-DOC-01 y 02, HU-DOC-03, HU-DOC-06 y 07 juntas (comparten el job), HU-DOC-05, HU-DOC-04, y por último HU-DOC-08 y 09\.
 
 ## **14\. Diagrama MER \- Modelo Datos**

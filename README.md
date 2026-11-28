@@ -330,6 +330,8 @@ Moto guarda todo en memoria: si lo detiene, el siguiente `docker compose up -d` 
 
 ### Mensajería en AWS real
 
+> **Despliegue completo en la cuenta del proyecto:** use la plantilla [`infra/aws/documents-stack.yaml`](infra/aws/documents-stack.yaml) y el paso a paso de [`infra/aws/README.md`](infra/aws/README.md). Crean tópicos, colas, DLQ, suscripciones, alarmas y el rol de la EC2, y documentan los pasos manuales. Lo que sigue resume los conceptos.
+
 1. **Región.** Confirme la región seleccionada del proyecto en AWS Settings > View all projects > Overview > Additional Info > Region. Todos los recursos van en esa región; no cree colas ni tópicos en otra.
 2. **Recursos.** Ejecute el mismo script contra AWS, sin endpoint, con una identidad que pueda crear colas y suscripciones (no la del servicio):
 
